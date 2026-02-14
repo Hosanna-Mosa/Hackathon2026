@@ -1,0 +1,47 @@
+{
+  "name": "drishyamitra-backend",
+  "version": "1.0.0",
+  "description": "Backend scaffold for Drishyamitra Agentic AI photo management platform",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "db:clear": "node scripts/clearDb.js"
+  },
+  "keywords": [
+    "express",
+    "mongodb",
+    "multer",
+    "agentic-ai",
+    "photo-management"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "axios": "^1.7.9",
+    "canvas": "^3.2.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "face-api.js": "^0.22.2",
+    "jpeg-js": "^0.4.4",
+    "mongoose": "^8.9.2",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "pngjs": "^7.0.0"
+  },
+  "overrides": {
+    "face-api.js": {
+      "@tensorflow/tfjs-core": "4.22.0",
+      "@tensorflow/tfjs-converter": "4.22.0",
+      "@tensorflow/tfjs-layers": "4.22.0",
+      "@tensorflow/tfjs": "4.22.0"
+    }
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}
