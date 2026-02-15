@@ -182,16 +182,26 @@ const uploadPhotos = async (req, res, next) => {
         const safeEmbedding = Array.isArray(face.embedding) ? face.embedding : [];
         let match = null;
         let evaluatedMatched = false;
+        let ambiguousCandidate = false;
+        let similarity = 0;
+        let secondBestSimilarity = 0;
+        let similarityDifference = 0;
         if (face.accepted) {
           try {
             match = await findBestPersonMatch(safeEmbedding);
-            const similarity = Number(match?.similarity || 0);
-            const secondBestSimilarity = Number(match?.secondBestSimilarity || 0);
-            const similarityDifference = similarity - secondBestSimilarity;
+            similarity = Number(match?.similarity || 0);
+            secondBestSimilarity = Number(match?.secondBestSimilarity || 0);
+            similarityDifference = similarity - secondBestSimilarity;
             evaluatedMatched =
               Boolean(match?.matched) &&
               similarity >= EVALUATED_MIN_SIMILARITY &&
               similarityDifference >= EVALUATED_MIN_GAP;
+            ambiguousCandidate =
+              !evaluatedMatched &&
+              Array.isArray(match?.topCandidates) &&
+              match.topCandidates.length > 1 &&
+              similarity >= EVALUATED_MIN_SIMILARITY &&
+              similarityDifference < EVALUATED_MIN_GAP;
 
             logUpload('face recognition evaluated', {
               fileName: sourceFile.originalname,
@@ -219,7 +229,17 @@ const uploadPhotos = async (req, res, next) => {
             });
           }
         }
-        evaluatedFaces.push({ faceIndex, face, safeEmbedding, match, evaluatedMatched });
+        evaluatedFaces.push({
+          faceIndex,
+          face,
+          safeEmbedding,
+          match,
+          evaluatedMatched,
+          ambiguousCandidate,
+          similarity: Number(similarity.toFixed(6)),
+          secondBestSimilarity: Number(secondBestSimilarity.toFixed(6)),
+          similarityDifference: Number(similarityDifference.toFixed(6))
+        });
       }
 
       let singleRefAllowedFaceIndex = null;
@@ -260,7 +280,16 @@ const uploadPhotos = async (req, res, next) => {
       }
 
       for (let faceIndex = 0; faceIndex < evaluatedFaces.length; faceIndex += 1) {
-        const { face, safeEmbedding, match, evaluatedMatched } = evaluatedFaces[faceIndex];
+        const {
+          face,
+          safeEmbedding,
+          match,
+          evaluatedMatched,
+          ambiguousCandidate,
+          similarity,
+          secondBestSimilarity,
+          similarityDifference
+        } = evaluatedFaces[faceIndex];
         const usesSingleReferenceStrategy = Boolean(match?.peopleCompared === 1);
         const matchedPerson = usesSingleReferenceStrategy
           ? singleRefAllowedFaceIndex === faceIndex
@@ -269,6 +298,23 @@ const uploadPhotos = async (req, res, next) => {
           : evaluatedMatched
             ? match.person
             : null;
+        const isAmbiguous = !usesSingleReferenceStrategy && !matchedPerson && ambiguousCandidate;
+        const topCandidates = Array.isArray(match?.topCandidates)
+          ? match.topCandidates
+              .map((candidate) => ({
+                name: String(candidate?.name || '').trim(),
+                similarity: Number(Number(candidate?.similarity || 0).toFixed(6))
+              }))
+              .filter((candidate) => candidate.name.length > 0)
+          : [];
+        const suggestedName = isAmbiguous
+          ? topCandidates[0]?.name || String(match?.person?.name || '').trim() || 'unknown'
+          : null;
+        const faceMatchStatus = matchedPerson
+          ? 'matched'
+          : isAmbiguous
+            ? 'ambiguous'
+            : 'unknown';
 
         try {
           const faceDoc = await Face.create({
@@ -291,8 +337,13 @@ const uploadPhotos = async (req, res, next) => {
             box: faceDoc.box,
             confidence: Number(Number(face.confidence || 0).toFixed(6)),
             personId: matchedPerson ? String(matchedPerson._id) : null,
-            name: matchedPerson ? matchedPerson.name : 'unknown',
-            learningConfirmed: faceDoc.learningConfirmed
+            name: matchedPerson ? matchedPerson.name : suggestedName || 'unknown',
+            learningConfirmed: faceDoc.learningConfirmed,
+            faceMatchStatus,
+            similarity,
+            secondBestSimilarity,
+            similarityGap: similarityDifference,
+            candidateNames: topCandidates
           });
         } catch (error) {
           // Face DB persistence is isolated; upload should never fail because of one face.

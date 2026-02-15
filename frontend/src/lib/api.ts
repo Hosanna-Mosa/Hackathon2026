@@ -25,6 +25,14 @@ export type UploadedFace = {
   personId: string | null;
   name: string;
   learningConfirmed?: boolean;
+  faceMatchStatus?: "matched" | "ambiguous" | "unknown";
+  similarity?: number;
+  secondBestSimilarity?: number;
+  similarityGap?: number;
+  candidateNames?: Array<{
+    name: string;
+    similarity: number;
+  }>;
 };
 
 export type UploadedPhoto = {
@@ -144,11 +152,39 @@ export const labelFaceApi = async (faceId: string, name: string) => {
   });
 };
 
-export const getPhotosApi = async (person?: string) => {
+export const confirmPhotoLabelsApi = async (photoId: string) => {
+  return apiFetch<{
+    success: boolean;
+    photoId: string;
+    confirmedCount: number;
+    confirmedFaceIds: string[];
+    peopleUpdated: number;
+  }>("/api/confirm-photo-labels", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ photoId }),
+  });
+};
+
+export const getPhotosApi = async (filters?: {
+  person?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) => {
   const params = new URLSearchParams();
 
-  if (person?.trim()) {
-    params.set("person", person.trim());
+  if (filters?.person?.trim()) {
+    params.set("person", filters.person.trim());
+  }
+
+  if (filters?.dateFrom?.trim()) {
+    params.set("dateFrom", filters.dateFrom.trim());
+  }
+
+  if (filters?.dateTo?.trim()) {
+    params.set("dateTo", filters.dateTo.trim());
   }
 
   const query = params.toString();

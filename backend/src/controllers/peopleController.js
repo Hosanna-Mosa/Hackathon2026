@@ -1,8 +1,9 @@
 const Person = require('../models/Person');
 const { runFaceApiDetection } = require('../services/faceApiDetection');
-const { uploadFilesToCloud } = require('../services/cloudUploadService');
+const { uploadPersonDpFromImageBuffer } = require('../services/personDpService');
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 const LABEL_MIN_FACE_CONFIDENCE = Number(process.env.LABEL_MIN_FACE_CONFIDENCE || 0.9);
 
 const getPeople = async (_req, res, next) => {
@@ -89,7 +90,7 @@ const getPeople = async (_req, res, next) => {
 
 const createPerson = async (req, res, next) => {
   try {
-    const name = String(req.body?.name || '').trim();
+    const name = normalizePersonName(req.body?.name);
 
     if (!name) {
       return res.status(400).json({
@@ -135,8 +136,18 @@ const createPerson = async (req, res, next) => {
       });
     }
 
-    const { urls } = await uploadFilesToCloud([req.file], 'people_labels');
-    const imageUrl = urls[0];
+    let imageUrl = '';
+    try {
+      const uploadedDp = await uploadPersonDpFromImageBuffer({
+        imageBuffer: req.file.buffer,
+        box: bestFace.box,
+        fileStem: name,
+        folder: 'people_labels'
+      });
+      imageUrl = uploadedDp || '';
+    } catch (_error) {
+      imageUrl = '';
+    }
     const embedding = Array.isArray(bestFace?.embedding) ? bestFace.embedding : [];
 
     const person = await Person.create({

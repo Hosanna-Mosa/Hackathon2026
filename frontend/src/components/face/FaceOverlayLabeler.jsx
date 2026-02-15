@@ -1,17 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const BOX_COLORS = [
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#14b8a6",
-  "#06b6d4",
-  "#3b82f6",
-  "#6366f1",
-  "#a855f7",
-  "#ec4899",
-];
+const COLOR_MATCHED = "#22c55e";
+const COLOR_AMBIGUOUS = "#3b82f6";
+const COLOR_UNKNOWN = "#ffffff";
 
 const toRgba = (hex, alpha) => {
   const normalized = String(hex || "").replace("#", "");
@@ -24,13 +15,60 @@ const toRgba = (hex, alpha) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
-const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
+const getFaceStatus = (face) => {
+  if (face?.learningConfirmed) {
+    return "matched";
+  }
+
+  if (face?.faceMatchStatus === "ambiguous") {
+    return "ambiguous";
+  }
+
+  if (face?.faceMatchStatus === "matched") {
+    return "matched";
+  }
+
+  const similarity = Number(face?.similarity || 0);
+  const similarityGap = Number(face?.similarityGap || 0);
+  const hasKnownName = String(face?.name || "").trim().toLowerCase() !== "unknown";
+
+  if (hasKnownName && similarity >= 0.95 && similarityGap < 0.02) {
+    return "ambiguous";
+  }
+
+  if (hasKnownName) {
+    return "matched";
+  }
+
+  return "unknown";
+};
+
+const getFaceColor = (face) => {
+  const status = getFaceStatus(face);
+  if (status === "matched") {
+    return COLOR_MATCHED;
+  }
+  if (status === "ambiguous") {
+    return COLOR_AMBIGUOUS;
+  }
+  return COLOR_UNKNOWN;
+};
+
+const FaceOverlayLabeler = ({
+  imageSrc,
+  faces,
+  isBusy,
+  onSaveLabel,
+  activeFaceId: controlledActiveFaceId = null,
+  onActiveFaceChange,
+}) => {
   const imageRef = useRef(null);
   const [renderSize, setRenderSize] = useState({ width: 1, height: 1 });
   const [naturalSize, setNaturalSize] = useState({ width: 1, height: 1 });
-  const [activeFaceId, setActiveFaceId] = useState(null);
+  const [internalActiveFaceId, setInternalActiveFaceId] = useState(null);
   const [draftLabel, setDraftLabel] = useState("");
   const [localError, setLocalError] = useState("");
+  const activeFaceId = controlledActiveFaceId ?? internalActiveFaceId;
 
   useEffect(() => {
     if (!imageRef.current) {
@@ -90,6 +128,25 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
 
   const activeFace = scaledFaces.find((face) => face.faceId === activeFaceId) || null;
 
+  useEffect(() => {
+    if (!activeFaceId) {
+      return;
+    }
+    const focusFace = scaledFaces.find((face) => face.faceId === activeFaceId);
+    if (!focusFace) {
+      return;
+    }
+    setDraftLabel((current) => (current.trim().length > 0 ? current : focusFace.name && focusFace.name !== "unknown" ? focusFace.name : ""));
+  }, [activeFaceId, scaledFaces]);
+
+  const setActiveFace = (nextFaceId) => {
+    if (typeof onActiveFaceChange === "function") {
+      onActiveFaceChange(nextFaceId);
+      return;
+    }
+    setInternalActiveFaceId(nextFaceId);
+  };
+
   const onSelectFace = (face) => {
     setLocalError("");
     if (isBusy) {
@@ -99,7 +156,7 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
       return;
     }
 
-    setActiveFaceId(face.faceId);
+    setActiveFace(face.faceId);
     setDraftLabel(face.name && face.name !== "unknown" ? face.name : "");
   };
 
@@ -107,7 +164,7 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
     if (isBusy) {
       return;
     }
-    setActiveFaceId(null);
+    setActiveFace(null);
     setDraftLabel("");
     setLocalError("");
   };
@@ -125,7 +182,7 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
 
     setLocalError("");
     await onSaveLabel(activeFace.faceId, name);
-    setActiveFaceId(null);
+    setActiveFace(null);
     setDraftLabel("");
   };
 
@@ -160,7 +217,8 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
         {scaledFaces.map((face, index) => {
           const isActive = face.faceId === activeFaceId;
           const disabled = Boolean(activeFaceId && activeFaceId !== face.faceId) || isBusy;
-          const color = BOX_COLORS[index % BOX_COLORS.length];
+          const color = getFaceColor(face);
+          const isUnknown = getFaceStatus(face) === "unknown";
 
           return (
             <button
@@ -177,12 +235,18 @@ const FaceOverlayLabeler = ({ imageSrc, faces, isBusy, onSaveLabel }) => {
                 width: face.rect.width,
                 height: face.rect.height,
                 borderColor: color,
-                boxShadow: isActive ? `0 0 0 3px ${toRgba(color, 0.35)}` : "none",
+                boxShadow: isActive
+                  ? `0 0 0 3px ${toRgba(color, 0.35)}`
+                  : isUnknown
+                    ? "0 0 0 1px rgba(0,0,0,0.3) inset"
+                    : "none",
               }}
               aria-label={`Face ${index + 1}`}
             >
               <span
-                className="absolute -top-4 left-0 rounded px-1 py-[1px] text-[9px] font-semibold leading-none text-white"
+                className={`absolute -top-4 left-0 rounded px-1 py-[1px] text-[9px] font-semibold leading-none ${
+                  isUnknown ? "text-black" : "text-white"
+                }`}
                 style={{ backgroundColor: toRgba(color, 0.78) }}
               >
                 {(face.orderIndex ?? index) + 1}

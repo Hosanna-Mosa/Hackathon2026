@@ -43,24 +43,16 @@ const AppSidebar = () => {
         })}
       </nav>
 
-      <div className="mx-3 mb-3 rounded-lg border border-border bg-background p-4">
+      {/* <div className="mx-3 mb-3 rounded-lg border border-border bg-background p-4">
         <p className="text-xs font-semibold text-primary">STORAGE PLAN</p>
         <Progress value={72} className="my-2 h-1.5" />
         <p className="text-xs text-muted-foreground">72.4 GB of 100 GB used</p>
         <button className="mt-3 w-full rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90">
           Upgrade Pro
         </button>
-      </div>
+      </div> */}
 
-      <div className="border-t border-border px-3 py-3">
-        <Link
-          to="/settings"
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          <Settings className="h-[18px] w-[18px]" />
-          Settings
-        </Link>
-      </div>
+
     </aside>
   );
 };
