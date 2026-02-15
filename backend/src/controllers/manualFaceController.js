@@ -2,10 +2,12 @@ const Face = require('../models/Face');
 const Photo = require('../models/Photo');
 const Person = require('../models/Person');
 const { extractManualFaceEmbedding } = require('../services/manualFaceService');
+const { uploadPersonDpFromImageUrl } = require('../services/personDpService');
 
 const DUPLICATE_SIMILARITY_THRESHOLD = Number(process.env.EMBEDDING_DUPLICATE_SIMILARITY_THRESHOLD || 0.9995);
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 const toVector = (value) => (Array.isArray(value) ? value.map((v) => Number(v) || 0) : []);
 
 const normalizeEmbeddingBank = (value) => {
@@ -89,7 +91,8 @@ const computeAverageEmbedding = (embeddings) => {
 };
 
 const appendEmbeddingToPerson = async (name, embedding) => {
-  const safeName = escapeRegex(String(name || '').trim());
+  const normalizedName = normalizePersonName(name);
+  const safeName = escapeRegex(normalizedName);
   if (!safeName) {
     const error = new Error('Name is required.');
     error.statusCode = 400;
@@ -103,7 +106,7 @@ const appendEmbeddingToPerson = async (name, embedding) => {
   let person = await Person.findOne(personQuery);
   if (!person) {
     person = await Person.create({
-      name: String(name).trim(),
+      name: normalizedName,
       embeddings: [embedding],
       averageEmbedding: embedding
     });
@@ -130,7 +133,7 @@ const appendEmbeddingToPerson = async (name, embedding) => {
 const manualFaceLabel = async (req, res, next) => {
   try {
     const photoId = String(req.body?.photoId || '').trim();
-    const name = String(req.body?.name || '').trim();
+    const name = normalizePersonName(req.body?.name);
     const box = req.body?.box;
 
     if (!photoId || !name || !box) {
@@ -157,6 +160,20 @@ const manualFaceLabel = async (req, res, next) => {
     }
 
     const person = await appendEmbeddingToPerson(name, embedding);
+    try {
+      const dpUrl = await uploadPersonDpFromImageUrl({
+        imageUrl: photo.imageUrl,
+        box: clampedBox,
+        fileStem: person.name,
+        folder: 'people_labels'
+      });
+      if (dpUrl) {
+        person.imageUrl = dpUrl;
+        await person.save();
+      }
+    } catch (_error) {
+      // DP generation failure should not block manual labeling.
+    }
 
     const face = await Face.create({
       photoId: photo._id,

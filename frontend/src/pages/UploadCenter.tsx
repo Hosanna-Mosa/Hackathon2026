@@ -1,11 +1,55 @@
 import { useRef, useState } from "react";
-import { Upload, Sparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Sparkles, Upload, UserRoundPlus } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { labelFaceApi, uploadPhotosApi, type UploadedPhoto } from "@/lib/api";
+import { confirmPhotoLabelsApi, labelFaceApi, uploadPhotosApi, type UploadedPhoto } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 import FaceOverlayLabeler from "@/components/face/FaceOverlayLabeler";
 import ManualFaceSelector from "@/components/face/ManualFaceSelector";
+
+const FACE_MATCH_MIN_SIMILARITY = 0.95;
+const FACE_AMBIGUOUS_MAX_GAP = 0.02;
+
+const getFaceStatus = (face: UploadedPhoto["faces"][number]) => {
+  if (face.learningConfirmed) {
+    return "matched";
+  }
+
+  if (face.faceMatchStatus === "ambiguous") {
+    return "ambiguous";
+  }
+
+  if (face.faceMatchStatus === "matched") {
+    return "matched";
+  }
+
+  const similarity = Number(face.similarity || 0);
+  const similarityGap = Number(face.similarityGap || 0);
+  const hasKnownName = String(face.name || "").trim().toLowerCase() !== "unknown";
+  if (hasKnownName && similarity >= FACE_MATCH_MIN_SIMILARITY && similarityGap < FACE_AMBIGUOUS_MAX_GAP) {
+    return "ambiguous";
+  }
+  if (hasKnownName) {
+    return "matched";
+  }
+  return "unknown";
+};
+
+const formatBytes = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${size.toFixed(size < 10 && unitIndex > 0 ? 1 : 0)} ${units[unitIndex]}`;
+};
 
 const UploadCenter = () => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -13,8 +57,12 @@ const UploadCenter = () => {
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isLabelSaving, setIsLabelSaving] = useState(false);
+  const [confirmingPhotoId, setConfirmingPhotoId] = useState<string | null>(null);
   const [faceOrder, setFaceOrder] = useState<"left_to_right" | "right_to_left">("left_to_right");
   const [manualModeByPhoto, setManualModeByPhoto] = useState<Record<string, boolean>>({});
+  const [focusedFaceIdByPhoto, setFocusedFaceIdByPhoto] = useState<Record<string, string | null>>({});
+  const [selectedCandidateByFace, setSelectedCandidateByFace] = useState<Record<string, string>>({});
+  const [customLabelByFace, setCustomLabelByFace] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
   const onSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -46,29 +94,18 @@ const UploadCenter = () => {
     try {
       setIsUploading(true);
       setError("");
-      if (import.meta.env.DEV) {
-        console.debug("[upload] upload started");
-      }
       const data = await uploadPhotosApi(selectedFiles, faceOrder);
       setUploadedPhotos(data.photos);
       setManualModeByPhoto({});
+      setFocusedFaceIdByPhoto({});
+      setSelectedCandidateByFace({});
+      setCustomLabelByFace({});
       setSelectedFiles([]);
-      if (import.meta.env.DEV) {
-        console.debug("[upload] upload success", {
-          message: data.message,
-          count: data.count,
-          returnedPhotos: data.photos.length,
-          faceOrder,
-        });
-      }
 
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
     } catch (err) {
-      if (import.meta.env.DEV) {
-        console.error("[upload] upload failed", err);
-      }
       setError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
       setIsUploading(false);
@@ -96,11 +133,28 @@ const UploadCenter = () => {
                   name: result.name,
                   personId: result.personId,
                   learningConfirmed: result.learningConfirmed ?? true,
+                  faceMatchStatus: "matched",
                 }
               : face
           ),
         }))
       );
+      setSelectedCandidateByFace((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, faceId)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[faceId];
+        return next;
+      });
+      setCustomLabelByFace((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, faceId)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[faceId];
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save face label.");
     } finally {
@@ -108,14 +162,17 @@ const UploadCenter = () => {
     }
   };
 
-  const onManualFaceSaved = (photoId: string, manualFace: {
-    faceId: string;
-    box: { x: number; y: number; width: number; height: number };
-    personId: string;
-    name: string;
-    confidence: number;
-    learningConfirmed: boolean;
-  }) => {
+  const onManualFaceSaved = (
+    photoId: string,
+    manualFace: {
+      faceId: string;
+      box: { x: number; y: number; width: number; height: number };
+      personId: string;
+      name: string;
+      confidence: number;
+      learningConfirmed: boolean;
+    }
+  ) => {
     setUploadedPhotos((prev) =>
       prev.map((photo) =>
         photo.photoId !== photoId
@@ -129,149 +186,194 @@ const UploadCenter = () => {
     setManualModeByPhoto((prev) => ({ ...prev, [photoId]: false }));
   };
 
+  const onConfirmAllLabels = async (photoId: string) => {
+    try {
+      setError("");
+      setConfirmingPhotoId(photoId);
+      const result = await confirmPhotoLabelsApi(photoId);
+      const confirmedFaceIdSet = new Set(result.confirmedFaceIds || []);
+
+      setUploadedPhotos((prev) =>
+        prev.map((photo) =>
+          photo.photoId !== photoId
+            ? photo
+            : {
+                ...photo,
+                faces: photo.faces.map((face) =>
+                  confirmedFaceIdSet.has(face.faceId) || (face.personId && face.learningConfirmed !== true)
+                    ? { ...face, learningConfirmed: true, faceMatchStatus: "matched" }
+                    : face
+                ),
+              }
+        )
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to confirm photo labels.");
+    } finally {
+      setConfirmingPhotoId(null);
+    }
+  };
+
   const progressValue = isUploading ? 65 : uploadedPhotos.length > 0 ? 100 : 0;
 
   return (
-    <div className="animate-fade-in">
-      <div className="mb-6 flex items-center justify-between">
+    <div className="animate-fade-in space-y-6">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Upload Center</h1>
-          <p className="text-sm text-muted-foreground">Add new memories for AI indexing</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Upload photos, review detected faces, and correct labels with a clean workflow.
+          </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground" type="button">
+        <div className="hidden items-center gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm font-medium text-primary md:flex">
           <Sparkles className="h-4 w-4" />
-          AI Stats
-        </button>
+          AI Assisted Labeling
+        </div>
       </div>
 
-      <div className="rounded-xl border-2 border-dashed border-primary/40 bg-secondary/20 p-12 text-center transition-colors hover:border-primary">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-primary/10">
-          <Upload className="h-8 w-8 text-primary" />
-        </div>
-        <h2 className="mt-4 text-xl font-bold text-foreground">Drag and drop your photos here</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Our AI will automatically recognize faces, categorize scenery, and index your images for easy searching.
-        </p>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={onSelectFiles}
-        />
-        <div className="mt-5 flex items-center justify-center gap-3">
-          <button
-            className="rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            Select Photos from Computer
-          </button>
-          <button
-            className="rounded-lg border border-border bg-card px-6 py-3 text-sm font-semibold text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-            type="button"
-            onClick={onUpload}
-            disabled={isUploading || selectedFiles.length === 0}
-          >
-            {isUploading ? "Uploading..." : `Upload ${selectedFiles.length > 0 ? `(${selectedFiles.length})` : ""}`}
-          </button>
-        </div>
-        <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-          <span>Label order:</span>
-          <select
-            className="rounded border border-border bg-background px-2 py-1 text-xs text-foreground"
-            value={faceOrder}
-            onChange={(e) => setFaceOrder(e.target.value as "left_to_right" | "right_to_left")}
-          >
-            <option value="left_to_right">Left to Right</option>
-            <option value="right_to_left">Right to Left</option>
-          </select>
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Supported formats: JPG, PNG, HEIC (Max 10MB per file)
-        </p>
-        {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-      </div>
+      <section className="rounded-2xl border border-border bg-gradient-to-br from-card to-muted/40 p-5 sm:p-6">
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <div>
+            <div className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10">
+              <Upload className="h-5 w-5 text-primary" />
+            </div>
+            <h2 className="mt-4 text-xl font-semibold text-foreground">Upload New Photos</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Supported formats: JPG, PNG, HEIC, WEBP. Max file size: 10MB per image.
+            </p>
 
-      <div className="mt-6 rounded-xl border border-border bg-card p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
-              <Upload className="h-4 w-4 text-primary" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={onSelectFiles}
+            />
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button
+                className="rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-opacity hover:opacity-90"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Choose Photos
+              </button>
+              <button
+                className="rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                onClick={onUpload}
+                disabled={isUploading || selectedFiles.length === 0}
+              >
+                {isUploading ? "Uploading..." : `Start Upload${selectedFiles.length ? ` (${selectedFiles.length})` : ""}`}
+              </button>
             </div>
-            <div>
-              <p className="font-semibold text-foreground">Upload Session</p>
-              <p className="text-xs text-muted-foreground">
-                {isUploading
-                  ? "Processing with AI..."
-                  : uploadedPhotos.length > 0
-                    ? `${uploadedPhotos.length} photos uploaded and indexed`
-                    : selectedFiles.length > 0
-                      ? `${selectedFiles.length} photos selected`
-                      : "No active upload"}
-              </p>
+
+            <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Face order:</span>
+              <select
+                className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+                value={faceOrder}
+                onChange={(e) => setFaceOrder(e.target.value as "left_to_right" | "right_to_left")}
+              >
+                <option value="left_to_right">Left to Right</option>
+                <option value="right_to_left">Right to Left</option>
+              </select>
             </div>
+
+            {error && (
+              <div className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
           </div>
-          <span className="text-lg font-bold text-primary">{progressValue}%</span>
-        </div>
-        <Progress value={progressValue} className="mt-3 h-2" />
-      </div>
 
-      <div className="mt-6">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-foreground">Session Status</p>
+              <span className="text-lg font-bold text-primary">{progressValue}%</span>
+            </div>
+            <Progress value={progressValue} className="mt-3 h-2" />
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {isUploading
+                ? "Processing with AI..."
+                : uploadedPhotos.length > 0
+                  ? `${uploadedPhotos.length} photo${uploadedPhotos.length === 1 ? "" : "s"} indexed`
+                  : selectedFiles.length > 0
+                    ? `${selectedFiles.length} photo${selectedFiles.length === 1 ? "" : "s"} ready to upload`
+                    : "No active upload"}
+            </p>
+
+            {selectedFiles.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-medium text-foreground">Queued Files</p>
+                <div className="max-h-36 space-y-1 overflow-auto pr-1">
+                  {selectedFiles.slice(0, 6).map((file) => (
+                    <div key={`${file.name}-${file.lastModified}`} className="flex items-center justify-between rounded-md border border-border/70 bg-muted/40 px-2 py-1.5 text-xs">
+                      <span className="max-w-[180px] truncate text-foreground">{file.name}</span>
+                      <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+                    </div>
+                  ))}
+                  {selectedFiles.length > 6 && (
+                    <p className="text-xs text-muted-foreground">+ {selectedFiles.length - 6} more file(s)</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-foreground">Upload Previews</h2>
-          <Badge variant="secondary" className="text-xs text-primary">
-            {isUploading ? "AI Recognition in Progress" : "Indexed Photos"}
+          <h2 className="text-lg font-semibold text-foreground">Upload Preview</h2>
+          <Badge variant="secondary" className="text-xs">
+            {isUploading ? "Analyzing" : "Ready for Review"}
           </Badge>
         </div>
 
         {uploadedPhotos.length === 0 ? (
-          <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
-            Uploaded photos will appear here with detected person labels.
+          <div className="rounded-xl border border-dashed border-border bg-card p-8 text-center text-sm text-muted-foreground">
+            Uploaded photos will appear here with face boxes and labeling actions.
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {uploadedPhotos.map((photo) => (
-              <div
-                key={photo.photoId}
-                className={`group relative overflow-hidden rounded-xl border border-border bg-card p-2 ${
-                  manualModeByPhoto[photo.photoId] ? "sm:col-span-2 lg:col-span-3" : ""
-                }`}
-              >
-                <img
-                  src={resolvePhotoUrl(photo.imageUrl)}
-                  alt="Uploaded photo"
-                  className={`w-full object-cover ${manualModeByPhoto[photo.photoId] ? "max-h-[520px]" : "aspect-square"}`}
-                />
-                <div className="mt-2 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] text-muted-foreground">
-                      {photo.faces.length} detected face{photo.faces.length === 1 ? "" : "s"}
-                    </span>
-                    {photo.faces.length > 0 && (
-                      <button
-                        type="button"
-                        className="rounded border border-border bg-background px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-accent"
-                        onClick={() =>
-                          setManualModeByPhoto((prev) => ({
-                            ...prev,
-                            [photo.photoId]: !prev[photo.photoId],
-                          }))
-                        }
-                      >
-                        {manualModeByPhoto[photo.photoId] ? "Back to Auto Labels" : "Add Missing Face"}
-                      </button>
-                    )}
+          <div className="space-y-5">
+            {uploadedPhotos.map((photo, photoIndex) => {
+              const isManualMode = Boolean(manualModeByPhoto[photo.photoId]);
+              const unresolvedCount = photo.faces.filter((face) => !face.personId).length;
+              const pendingConfirmCount = photo.faces.filter((face) => face.personId && !face.learningConfirmed).length;
+              const isConfirmingThisPhoto = confirmingPhotoId === photo.photoId;
+              return (
+                <article key={photo.photoId} className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-foreground">Photo {photoIndex + 1}</h3>
+                      <p className="text-xs text-muted-foreground">
+                        {photo.faces.length} detected face{photo.faces.length === 1 ? "" : "s"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {photo.faces.length > 0 && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                          onClick={() =>
+                            setManualModeByPhoto((prev) => ({
+                              ...prev,
+                              [photo.photoId]: !prev[photo.photoId],
+                            }))
+                          }
+                        >
+                          <UserRoundPlus className="h-3.5 w-3.5" />
+                          {isManualMode ? "Back to Auto View" : "Add Missing Face"}
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  {photo.faces.length === 0 ? (
-                    <ManualFaceSelector
-                      imageSrc={resolvePhotoUrl(photo.imageUrl)}
-                      photoId={photo.photoId}
-                      autoFacesCount={0}
-                      onSaved={(face) => onManualFaceSaved(photo.photoId, face)}
-                    />
-                  ) : manualModeByPhoto[photo.photoId] ? (
+
+                  {photo.faces.length === 0 || isManualMode ? (
                     <ManualFaceSelector
                       imageSrc={resolvePhotoUrl(photo.imageUrl)}
                       photoId={photo.photoId}
@@ -279,36 +381,189 @@ const UploadCenter = () => {
                       onSaved={(face) => onManualFaceSaved(photo.photoId, face)}
                     />
                   ) : (
-                  <>
-                    <p className="text-[10px] text-muted-foreground">
-                      Click face box to label/confirm. Only one editor is active at a time.
-                    </p>
-                    <FaceOverlayLabeler
-                      imageSrc={resolvePhotoUrl(photo.imageUrl)}
-                      faces={photo.faces}
-                      isBusy={isLabelSaving}
-                      onSaveLabel={onLabelFace}
-                    />
-                    <div className="space-y-1">
-                      {photo.faces.map((face, index) => (
-                        <p key={face.faceId} className="text-[10px] text-muted-foreground">
-                          Person {(face.orderIndex ?? index) + 1}:{" "}
-                          {face.learningConfirmed
-                            ? `Saved: ${face.name}`
-                            : face.name !== "unknown"
-                            ? `Matched: ${face.name} (Confirm from box)`
-                              : "Unknown"}
+                    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">
+                          Click a face box on the image to quickly confirm or update the name.
                         </p>
-                      ))}
+                        <FaceOverlayLabeler
+                          imageSrc={resolvePhotoUrl(photo.imageUrl)}
+                          faces={photo.faces}
+                          isBusy={isLabelSaving}
+                          onSaveLabel={onLabelFace}
+                          activeFaceId={focusedFaceIdByPhoto[photo.photoId] || null}
+                          onActiveFaceChange={(faceId) =>
+                            setFocusedFaceIdByPhoto((prev) => ({
+                              ...prev,
+                              [photo.photoId]: faceId,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+                        <p className="text-sm font-semibold text-foreground">Detected People</p>
+
+                        {photo.faces.map((face, index) => {
+                          const status = getFaceStatus(face);
+                          const personLabel = `Person ${(face.orderIndex ?? index) + 1}`;
+                          const candidates =
+                            Array.isArray(face.candidateNames) && face.candidateNames.length > 0
+                              ? face.candidateNames
+                              : face.name && face.name !== "unknown"
+                                ? [{ name: face.name, similarity: Number(face.similarity || 0) }]
+                                : [];
+                          const selectedName = selectedCandidateByFace[face.faceId] || candidates[0]?.name || "";
+                          const customLabel = customLabelByFace[face.faceId] || "";
+                          const isFocused = (focusedFaceIdByPhoto[photo.photoId] || null) === face.faceId;
+
+                          return (
+                            <div
+                              key={face.faceId}
+                              className={`rounded-lg border bg-card p-3 transition-all ${
+                                isFocused
+                                  ? "border-primary shadow-[0_0_0_2px_rgba(59,130,246,0.18)]"
+                                  : "border-border"
+                              }`}
+                              onClick={() =>
+                                setFocusedFaceIdByPhoto((prev) => ({
+                                  ...prev,
+                                  [photo.photoId]: face.faceId,
+                                }))
+                              }
+                            >
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-sm font-medium text-foreground">{personLabel}</p>
+                                {status === "matched" ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                    <CheckCircle2 className="h-3 w-3" /> Matched
+                                  </span>
+                                ) : status === "ambiguous" ? (
+                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                                    Needs confirmation
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                                    Unknown
+                                  </span>
+                                )}
+                              </div>
+
+                              {status === "matched" ? (
+                                <p className="text-xs text-muted-foreground">
+                                  {face.learningConfirmed ? (
+                                    <>
+                                      Saved as{" "}
+                                      <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
+                                        {face.name}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      Matched as{" "}
+                                      <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
+                                        {face.name}
+                                      </span>
+                                      . Confirm from box if needed.
+                                    </>
+                                  )}
+                                </p>
+                              ) : status === "ambiguous" ? (
+                                <div className="space-y-2">
+                                  <p className="text-xs text-muted-foreground">Choose existing candidate or save a new label.</p>
+                                  {candidates.slice(0, 3).length > 0 && (
+                                    <div className="flex flex-col gap-2 sm:flex-row">
+                                      <select
+                                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+                                        value={selectedName}
+                                        onChange={(e) =>
+                                          setSelectedCandidateByFace((prev) => ({
+                                            ...prev,
+                                            [face.faceId]: e.target.value,
+                                          }))
+                                        }
+                                        disabled={isLabelSaving}
+                                      >
+                                        {candidates.slice(0, 3).map((candidate) => (
+                                          <option key={`${face.faceId}-${candidate.name}`} value={candidate.name}>
+                                            {candidate.name} ({Number(candidate.similarity || 0).toFixed(3)})
+                                          </option>
+                                        ))}
+                                      </select>
+                                      <button
+                                        type="button"
+                                        className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                        disabled={isLabelSaving || !selectedName}
+                                        onClick={() => {
+                                          void onLabelFace(face.faceId, selectedName);
+                                        }}
+                                      >
+                                        {isLabelSaving ? "Saving..." : "Confirm"}
+                                      </button>
+                                    </div>
+                                  )}
+
+                                  <div className="flex flex-col gap-2 sm:flex-row">
+                                    <input
+                                      type="text"
+                                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+                                      placeholder="Enter new label"
+                                      value={customLabel}
+                                      onChange={(e) =>
+                                        setCustomLabelByFace((prev) => ({
+                                          ...prev,
+                                          [face.faceId]: e.target.value,
+                                        }))
+                                      }
+                                      disabled={isLabelSaving}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                      disabled={isLabelSaving || !customLabel.trim()}
+                                      onClick={() => {
+                                        void onLabelFace(face.faceId, customLabel.trim());
+                                      }}
+                                    >
+                                      {isLabelSaving ? "Saving..." : "Save Label"}
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">No confident match yet. Use the face box to assign a name.</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </>
                   )}
-                </div>
-              </div>
-            ))}
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+                    <p className="text-xs text-muted-foreground">
+                      {unresolvedCount > 0
+                        ? `${unresolvedCount} face${unresolvedCount === 1 ? "" : "s"} still need a label before confirmation.`
+                        : pendingConfirmCount > 0
+                          ? `${pendingConfirmCount} matched face${pendingConfirmCount === 1 ? "" : "s"} ready to be learned.`
+                          : "All labels for this photo are already confirmed and learned."}
+                    </p>
+                    <button
+                      type="button"
+                      className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={isConfirmingThisPhoto || unresolvedCount > 0 || pendingConfirmCount === 0}
+                      onClick={() => {
+                        void onConfirmAllLabels(photo.photoId);
+                      }}
+                    >
+                      {isConfirmingThisPhoto ? "Confirming..." : "Confirm All Labels"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };

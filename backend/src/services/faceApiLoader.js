@@ -37,6 +37,7 @@ const preloadFaceApiModels = async () => {
       const modelDir = getModelDir();
       await Promise.all([
         faceapi.nets.ssdMobilenetv1.loadFromDisk(modelDir),
+        faceapi.nets.tinyFaceDetector.loadFromDisk(modelDir),
         faceapi.nets.faceLandmark68Net.loadFromDisk(modelDir),
         faceapi.nets.faceRecognitionNet.loadFromDisk(modelDir)
       ]);

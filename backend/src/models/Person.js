@@ -6,7 +6,8 @@ const personSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      trim: true
+      trim: true,
+      lowercase: true
     },
     embeddings: {
       // Learning memory: one embedding per confirmed label event.
