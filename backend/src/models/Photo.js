@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const photoSchema = new mongoose.Schema(
   {
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     // Public URL returned by VPS cloud upload server.
     imageUrl: {
       type: String,

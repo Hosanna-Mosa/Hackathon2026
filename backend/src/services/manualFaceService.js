@@ -1,4 +1,3 @@
-require('./tfjsCompat');
 const axios = require('axios');
 const tf = require('@tensorflow/tfjs');
 const canvas = require('canvas');

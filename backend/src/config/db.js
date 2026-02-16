@@ -1,5 +1,22 @@
 const mongoose = require('mongoose');
 
+const buildMongoHelpMessage = (error) => {
+  const message = String(error?.message || '');
+
+  if (message.includes('IP that isn\'t whitelisted') || message.includes('Could not connect to any servers in your MongoDB Atlas cluster')) {
+    return (
+      `${message}\n` +
+      'Atlas fix: add your current IP in Network Access, or temporarily allow 0.0.0.0/0 for development.'
+    );
+  }
+
+  if (message.includes('querySrv ENOTFOUND')) {
+    return `${message}\nDNS lookup failed for the MongoDB SRV host. Check internet/VPN/firewall and URI host.`;
+  }
+
+  return message;
+};
+
 const connectDB = async () => {
   const mongoUri = process.env.MONGO_URI;
 
@@ -7,18 +24,15 @@ const connectDB = async () => {
     throw new Error('MONGO_URI is missing in environment variables.');
   }
 
-  console.log('Attempting to connect to MongoDB...');
   try {
     await mongoose.connect(mongoUri, {
-      serverSelectionTimeoutMS: 30000,
-      socketTimeoutMS: 45000,
-      family: 4 // Force IPv4 to avoid potential IPv6 issues
+      serverSelectionTimeoutMS: 10000
     });
-    console.log('MongoDB connected successfully');
   } catch (error) {
-    console.error('MongoDB connection error detail:', error);
-    throw error;
+    throw new Error(buildMongoHelpMessage(error));
   }
+
+  console.log('MongoDB connected');
 };
 
 module.exports = connectDB;
