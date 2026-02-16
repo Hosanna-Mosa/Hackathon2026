@@ -5,7 +5,7 @@ const Face = require('../models/Face');
 const Delivery = require('../models/Delivery');
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 
 /**
  * Resolves a date string into a MongoDB date range query.
@@ -87,8 +87,12 @@ const buildPhotoQuery = async (params) => {
             const faces = await Face.find(faceQuery).select('photoId');
             photoIdsFromFaces = faces.map(f => f.photoId);
         } else {
-            // Fallback for legacy photo documents where names may be in detectedPersons.
-            query.detectedPersons = { $elemMatch: { $regex: new RegExp(`^${safePerson}$`, 'i') } };
+            // Fallback: If person not found in labeled People, search tags or event for the name.
+            // This allows finding photos by name even if faces aren't explicitly labeled yet if they have metadata.
+            query.$or = [
+                { tags: { $in: [new RegExp(safePerson, 'i')] } },
+                { event: { $regex: new RegExp(safePerson, 'i') } }
+            ];
         }
     }
 
@@ -151,8 +155,8 @@ const countPhotos = async (params) => {
 const getStats = async (metric, ownerId) => {
     if (metric === 'most_photos' || metric === 'least_photos') {
         const sort = metric === 'most_photos' ? -1 : 1;
-        const ownerObjectId = mongoose.Types.ObjectId.isValid(userId)
-            ? new mongoose.Types.ObjectId(userId)
+        const ownerObjectId = mongoose.Types.ObjectId.isValid(ownerId)
+            ? new mongoose.Types.ObjectId(ownerId)
             : null;
         const matchStage = ownerObjectId ? [{ $match: { ownerId: ownerObjectId } }] : [];
         const stats = await Face.aggregate([

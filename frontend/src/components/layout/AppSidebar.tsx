@@ -31,11 +31,10 @@ const AppSidebar = () => {
             <Link
               key={item.path}
               to={item.path}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                isActive
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${isActive
                   ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              }`}
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground hover:scale-105"
+                }`}
             >
               <item.icon className="h-[18px] w-[18px]" />
               {item.label}
@@ -50,7 +49,7 @@ const AppSidebar = () => {
         <button
           type="button"
           onClick={logout}
-          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground transition-all hover:bg-destructive hover:text-destructive-foreground hover:scale-105"
         >
           <LogOut className="h-3.5 w-3.5" />
           Logout
