@@ -25,6 +25,7 @@ const handleDeliveryIntent = async (decision) => {
   const delivery = await Delivery.create({
     person,
     type,
+    status: 'sent',
     timestamp: new Date()
   });
 
