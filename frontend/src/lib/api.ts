@@ -56,6 +56,8 @@ export type AuthResponse = {
   success: boolean;
   user: AuthUser;
   token: string;
+};
+
 export type DeliveryRecord = {
   _id: string;
   person: string;
