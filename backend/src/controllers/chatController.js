@@ -58,6 +58,7 @@ const handleDeliveryIntent = async (decision, userId) => {
     ownerId: userId,
     person,
     type,
+    status: 'sent',
     timestamp: new Date()
   });
 

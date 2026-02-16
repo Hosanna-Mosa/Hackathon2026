@@ -56,6 +56,34 @@ export type AuthResponse = {
   success: boolean;
   user: AuthUser;
   token: string;
+export type DeliveryRecord = {
+  _id: string;
+  person: string;
+  type: "email" | "whatsapp" | "direct_link";
+  recipientEmail?: string;
+  subject?: string;
+  message?: string;
+  photoLinks?: string[];
+  status?: "pending" | "sent" | "failed";
+  providerMessageId?: string;
+  errorMessage?: string;
+  timestamp?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type DeliveryStats = {
+  total: number;
+  byStatus: {
+    pending: number;
+    sent: number;
+    failed: number;
+  };
+  byType: {
+    email: number;
+    whatsapp: number;
+    direct_link: number;
+  };
 };
 
 type ApiError = {
@@ -318,5 +346,90 @@ export const chatWithAgentApi = async (message: string) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ message }),
+  });
+};
+
+export const sendDeliveryEmailApi = async (payload: {
+  person: string;
+  recipientEmail: string;
+  subject?: string;
+  message: string;
+  photoLinks?: string[];
+}) => {
+  return apiFetch<{
+    success: boolean;
+    message: string;
+    delivery: DeliveryRecord;
+  }>("/api/deliveries/send-email", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const getDeliveriesApi = async (filters?: {
+  statuses?: Array<"pending" | "sent" | "failed">;
+  types?: Array<"email" | "whatsapp" | "direct_link">;
+  limit?: number;
+}) => {
+  const params = new URLSearchParams();
+  if (filters?.statuses && filters.statuses.length > 0) {
+    params.set("statuses", filters.statuses.join(","));
+  }
+  if (filters?.types && filters.types.length > 0) {
+    params.set("types", filters.types.join(","));
+  }
+  if (filters?.limit && Number.isFinite(filters.limit)) {
+    params.set("limit", String(filters.limit));
+  }
+  const query = params.toString();
+  const endpoint = query ? `/api/deliveries?${query}` : "/api/deliveries";
+
+  return apiFetch<{
+    success: boolean;
+    count: number;
+    deliveries: DeliveryRecord[];
+    stats: DeliveryStats;
+  }>(endpoint);
+};
+
+export const createDeliveryApi = async (payload: {
+  person: string;
+  type: "email" | "whatsapp" | "direct_link";
+  status?: "pending" | "sent" | "failed";
+  recipientEmail?: string;
+  subject?: string;
+  message?: string;
+  photoLinks?: string[];
+}) => {
+  return apiFetch<{
+    success: boolean;
+    message: string;
+    delivery: DeliveryRecord;
+  }>("/api/deliveries", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+};
+
+export const updateDeliveryStatusApi = async (
+  deliveryId: string,
+  payload: { status: "pending" | "sent" | "failed"; errorMessage?: string; providerMessageId?: string }
+) => {
+  return apiFetch<{
+    success: boolean;
+    message: string;
+    delivery: DeliveryRecord;
+  }>(`/api/deliveries/${deliveryId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
   });
 };
