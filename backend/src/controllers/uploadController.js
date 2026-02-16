@@ -104,14 +104,39 @@ const uploadPhotos = async (req, res, next) => {
     validateFiles(req.files);
     const faceOrder = resolveFaceOrder(req.body?.faceOrder);
     const runFaceApiComparison = shouldRunFaceApiComparison(req);
-    // Accept folder from multipart form field per cloud API contract.
-    const { urls, folder } = await uploadFilesToCloud(req.files, req.body?.folder);
+
+    // Start cloud upload and face detection in parallel
+    const cloudUploadPromise = uploadFilesToCloud(req.files, req.body?.folder);
+
+    // Start detection for all files
+    const detectionPromises = req.files.map(async (file) => {
+      try {
+        return await runFaceApiDetection(file.buffer);
+      } catch (error) {
+        logUpload('faceapi detection failed for file', {
+          fileName: file.originalname,
+          message: error.message
+        });
+        return {
+          attempts: 0,
+          totalPersons: 0,
+          validFaces: 0,
+          uncertainPersons: 0,
+          faces: []
+        };
+      }
+    });
+
+    // Wait for cloud upload first to get URLs (or fail early if upload fails)
+    const { urls, folder } = await cloudUploadPromise;
+
     logUpload('cloud upload returned', {
       returnedUrlCount: urls.length,
       folder,
       faceOrder,
       runFaceApiComparison
     });
+
     const usableCount = Math.min(req.files.length, urls.length);
 
     if (usableCount === 0) {
@@ -121,6 +146,9 @@ const uploadPhotos = async (req, res, next) => {
         message: 'Cloud upload completed but no file URLs were returned.'
       });
     }
+
+    // Wait for detections to finish
+    const detections = await Promise.all(detectionPromises);
 
     const savedPhotos = [];
     const createdPhotoIds = [];
@@ -133,23 +161,7 @@ const uploadPhotos = async (req, res, next) => {
     for (let index = 0; index < usableCount; index += 1) {
       const imageUrl = urls[index];
       const sourceFile = req.files[index];
-      let detection = {
-        attempts: 0,
-        totalPersons: 0,
-        validFaces: 0,
-        uncertainPersons: 0,
-        faces: []
-      };
-
-      try {
-        detection = await runFaceApiDetection(sourceFile.buffer);
-      } catch (error) {
-        // Detection errors never abort upload flow.
-        logUpload('faceapi detection failed for file', {
-          fileName: sourceFile.originalname,
-          message: error.message
-        });
-      }
+      const detection = detections[index];
 
       personsDetected += detection.totalPersons;
       facesConfirmed += detection.validFaces;
@@ -315,11 +327,11 @@ const uploadPhotos = async (req, res, next) => {
         const isAmbiguous = !usesSingleReferenceStrategy && !matchedPerson && ambiguousCandidate;
         const topCandidates = Array.isArray(match?.topCandidates)
           ? match.topCandidates
-              .map((candidate) => ({
-                name: String(candidate?.name || '').trim(),
-                similarity: Number(Number(candidate?.similarity || 0).toFixed(6))
-              }))
-              .filter((candidate) => candidate.name.length > 0)
+            .map((candidate) => ({
+              name: String(candidate?.name || '').trim(),
+              similarity: Number(Number(candidate?.similarity || 0).toFixed(6))
+            }))
+            .filter((candidate) => candidate.name.length > 0)
           : [];
         const suggestedName = isAmbiguous
           ? topCandidates[0]?.name || String(match?.person?.name || '').trim() || 'unknown'

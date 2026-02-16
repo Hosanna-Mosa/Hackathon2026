@@ -101,6 +101,42 @@ const getPhotos = async (req, res, next) => {
   }
 };
 
+const deletePhoto = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const userId = String(req.userId || '').trim();
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
+    const photo = await Photo.findOne({ _id: id, ownerId: userId });
+    if (!photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'Photo not found.'
+      });
+    }
+
+    // Delete associated faces
+    await Face.deleteMany({ photoId: photo._id });
+
+    // Delete the photo document
+    await Photo.deleteOne({ _id: photo._id });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Photo deleted successfully.'
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
-  getPhotos
+  getPhotos,
+  deletePhoto
 };

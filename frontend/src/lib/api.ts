@@ -337,6 +337,13 @@ export const getPhotosApi = async (filters?: {
   return apiFetch<{ photos: Photo[]; count: number }>(endpoint);
 };
 
+export const deletePhotoApi = async (photoId: string) => {
+  return apiFetch<{ success: boolean; message: string }>(`/api/photos/${photoId}`, {
+    method: "DELETE",
+  });
+
+};
+
 export const getPeopleApi = async () => {
   return apiFetch<{ people: PersonSummary[]; count: number }>("/api/people");
 };

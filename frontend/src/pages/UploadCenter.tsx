@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Sparkles, Upload, UserRoundPlus } from "lucide-react";
+import { AlertCircle, CheckCircle2, Sparkles, Upload, UserRoundPlus, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { confirmPhotoLabelsApi, labelFaceApi, uploadPhotosApi, type UploadedPhoto } from "@/lib/api";
@@ -57,6 +57,7 @@ const UploadCenter = () => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadedPhotos, setUploadedPhotos] = useState<UploadedPhoto[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isLabelSaving, setIsLabelSaving] = useState(false);
   const [confirmingPhotoId, setConfirmingPhotoId] = useState<string | null>(null);
   const [faceOrder, setFaceOrder] = useState<"left_to_right" | "right_to_left">("left_to_right");
@@ -92,22 +93,72 @@ const UploadCenter = () => {
       return;
     }
 
-    try {
-      setIsUploading(true);
-      setError("");
-      const data = await uploadPhotosApi(selectedFiles, faceOrder);
-      setUploadedPhotos(data.photos);
-      setManualModeByPhoto({});
-      setFocusedFaceIdByPhoto({});
-      setSelectedCandidateByFace({});
-      setCustomLabelByFace({});
-      setSelectedFiles([]);
+    setIsUploading(true);
+    setUploadProgress(0);
+    setError("");
+    setManualModeByPhoto({});
+    setFocusedFaceIdByPhoto({});
+    setSelectedCandidateByFace({});
+    setCustomLabelByFace({});
 
+    // Clear previous results only if we are starting a fresh batch that replaces everything? 
+    // Or should we append? The UI seems to imply a session. 
+    // Let's clear for now to match previous behavior, or we could append.
+    // Previous behavior: setUploadedPhotos(data.photos) -> replaced.
+    // Let's replace the list to start fresh, but then append as we go.
+    setUploadedPhotos([]);
+
+    const totalFiles = selectedFiles.length;
+    let successCount = 0;
+    let failCount = 0;
+    const newPhotos: UploadedPhoto[] = [];
+
+    try {
+      // Process files one by one to show progress
+      for (let i = 0; i < totalFiles; i++) {
+        const file = selectedFiles[i];
+
+        // Simulate progress for the current file since we don't have real-time byte progress
+        let fileSimulatedProgress = 0;
+        const progressInterval = setInterval(() => {
+          fileSimulatedProgress = Math.min(fileSimulatedProgress + (Math.random() * 10 + 5), 90);
+          const currentTotal = ((i * 100) + fileSimulatedProgress) / totalFiles;
+          setUploadProgress(Math.round(currentTotal));
+        }, 500);
+
+        try {
+          // Upload single file
+          const data = await uploadPhotosApi([file], faceOrder);
+
+          if (data.photos && data.photos.length > 0) {
+            newPhotos.push(...data.photos);
+            setUploadedPhotos((prev) => [...prev, ...data.photos]);
+          }
+          successCount++;
+        } catch (err) {
+          console.error(`Failed to upload file ${file.name}:`, err);
+          failCount++;
+          // Optional: show a toast or partial error?
+        } finally {
+          clearInterval(progressInterval);
+          // Update progress to reflect this file is 100% done
+          setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
+        }
+      }
+
+      if (failCount > 0) {
+        setError(`Completed with issues: ${successCount} uploaded, ${failCount} failed.`);
+      } else {
+        // All good
+      }
+
+      setSelectedFiles([]);
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed.");
+      setError(err instanceof Error ? err.message : "Upload process failed.");
     } finally {
       setIsUploading(false);
     }
@@ -134,12 +185,12 @@ const UploadCenter = () => {
           faces: photo.faces.map((face) =>
             face.faceId === faceId
               ? {
-                  ...face,
-                  name: result.name,
-                  personId: result.personId,
-                  learningConfirmed: result.learningConfirmed ?? true,
-                  faceMatchStatus: "matched",
-                }
+                ...face,
+                name: result.name,
+                personId: result.personId,
+                learningConfirmed: result.learningConfirmed ?? true,
+                faceMatchStatus: "matched",
+              }
               : face
           ),
         }))
@@ -183,9 +234,9 @@ const UploadCenter = () => {
         photo.photoId !== photoId
           ? photo
           : {
-              ...photo,
-              faces: [...photo.faces, manualFace],
-            }
+            ...photo,
+            faces: [...photo.faces, manualFace],
+          }
       )
     );
     setManualModeByPhoto((prev) => ({ ...prev, [photoId]: false }));
@@ -203,13 +254,13 @@ const UploadCenter = () => {
           photo.photoId !== photoId
             ? photo
             : {
-                ...photo,
-                faces: photo.faces.map((face) =>
-                  confirmedFaceIdSet.has(face.faceId) || (face.personId && face.learningConfirmed !== true)
-                    ? { ...face, learningConfirmed: true, faceMatchStatus: "matched" }
-                    : face
-                ),
-              }
+              ...photo,
+              faces: photo.faces.map((face) =>
+                confirmedFaceIdSet.has(face.faceId) || (face.personId && face.learningConfirmed !== true)
+                  ? { ...face, learningConfirmed: true, faceMatchStatus: "matched" }
+                  : face
+              ),
+            }
         )
       );
     } catch (err) {
@@ -219,7 +270,7 @@ const UploadCenter = () => {
     }
   };
 
-  const progressValue = isUploading ? 65 : uploadedPhotos.length > 0 ? 100 : 0;
+  const progressValue = isUploading ? uploadProgress : uploadedPhotos.length > 0 ? 100 : 0;
 
   return (
     <div className="animate-fade-in space-y-6">
@@ -270,7 +321,14 @@ const UploadCenter = () => {
                 onClick={onUpload}
                 disabled={isUploading || selectedFiles.length === 0}
               >
-                {isUploading ? "Uploading..." : `Start Upload${selectedFiles.length ? ` (${selectedFiles.length})` : ""}`}
+                {isUploading ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </div>
+                ) : (
+                  `Start Upload${selectedFiles.length ? ` (${selectedFiles.length})` : ""}`
+                )}
               </button>
             </div>
 
@@ -296,14 +354,17 @@ const UploadCenter = () => {
 
           <div className="rounded-xl border border-border bg-card p-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-foreground">Session Status</p>
+              <div className="flex items-center gap-2">
+                <p className="text-sm font-semibold text-foreground">Session Status</p>
+                {isUploading && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+              </div>
               <span className="text-lg font-bold text-primary">{progressValue}%</span>
             </div>
             <Progress value={progressValue} className="mt-3 h-2" />
 
             <p className="mt-3 text-xs text-muted-foreground">
               {isUploading
-                ? "Processing with AI..."
+                ? `Processing photo ${Math.min(uploadedPhotos.length + 1, selectedFiles.length)} of ${selectedFiles.length}...`
                 : uploadedPhotos.length > 0
                   ? `${uploadedPhotos.length} photo${uploadedPhotos.length === 1 ? "" : "s"} indexed`
                   : selectedFiles.length > 0
@@ -425,11 +486,10 @@ const UploadCenter = () => {
                           return (
                             <div
                               key={face.faceId}
-                              className={`rounded-lg border bg-card p-3 transition-all ${
-                                isFocused
-                                  ? "border-primary shadow-[0_0_0_2px_rgba(59,130,246,0.18)]"
-                                  : "border-border"
-                              }`}
+                              className={`rounded-lg border bg-card p-3 transition-all ${isFocused
+                                ? "border-primary shadow-[0_0_0_2px_rgba(59,130,246,0.18)]"
+                                : "border-border"
+                                }`}
                               onClick={() =>
                                 setFocusedFaceIdByPhoto((prev) => ({
                                   ...prev,
