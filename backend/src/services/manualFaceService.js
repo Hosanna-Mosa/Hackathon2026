@@ -1,6 +1,6 @@
-require('./tfjsCompat');
 const axios = require('axios');
-const tf = require('@tensorflow/tfjs-node');
+const { tf } = require('./tensorflowRuntime');
+const { decodeImageBufferToTensor } = require('./tfImageUtils');
 
 const MIN_BOX_SIZE_PX = Number(process.env.MANUAL_FACE_MIN_BOX_SIZE || 24);
 
@@ -81,7 +81,7 @@ const extractManualFaceEmbedding = async (imageUrl, rawBox) => {
   let imageTensor;
   let cropTensor;
   try {
-    imageTensor = tf.node.decodeImage(Buffer.from(response.data), 3);
+    imageTensor = await decodeImageBufferToTensor(Buffer.from(response.data));
     const [imageHeight, imageWidth] = imageTensor.shape;
 
     const box = assertAndClampBox(rawBox, imageWidth, imageHeight);

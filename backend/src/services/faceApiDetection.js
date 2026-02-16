@@ -1,5 +1,4 @@
-require('./tfjsCompat');
-const tf = require('@tensorflow/tfjs-node');
+const { tf } = require('./tensorflowRuntime');
 const canvas = require('canvas');
 const { getFaceApi } = require('./faceApiLoader');
 

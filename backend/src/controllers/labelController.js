@@ -2,9 +2,9 @@ const Face = require('../models/Face');
 const Person = require('../models/Person');
 const Photo = require('../models/Photo');
 const { uploadPersonDpFromImageUrl } = require('../services/personDpService');
+const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const DUPLICATE_SIMILARITY_THRESHOLD = Number(process.env.EMBEDDING_DUPLICATE_SIMILARITY_THRESHOLD || 0.9995);
-const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 
 const toVector = (value) => (Array.isArray(value) ? value.map((v) => Number(v) || 0) : []);
@@ -114,6 +114,14 @@ const attachEmbeddingToPerson = async (person, embedding) => {
 
 const labelFace = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const faceId = String(req.body?.faceId || '').trim();
     const name = normalizePersonName(req.body?.name);
 
@@ -124,7 +132,7 @@ const labelFace = async (req, res, next) => {
       });
     }
 
-    const face = await Face.findById(faceId);
+    const face = await Face.findOne({ _id: faceId, ownerId: userId });
     if (!face) {
       return res.status(404).json({
         success: false,
@@ -139,16 +147,14 @@ const labelFace = async (req, res, next) => {
       });
     }
 
-    const safeName = escapeRegex(name);
-    let person = await Person.findOne({
-      name: { $regex: `^${safeName}$`, $options: 'i' }
-    });
+    let person = await Person.findOne({ ownerId: userId, name });
     if (!person) {
       // Upsert prevents duplicate creation during concurrent labels.
       person = await Person.findOneAndUpdate(
-        { name: { $regex: `^${safeName}$`, $options: 'i' } },
+        { ownerId: userId, name },
         {
           $setOnInsert: {
+            ownerId: userId,
             name,
             embeddings: [newEmbedding],
             averageEmbedding: newEmbedding
@@ -165,7 +171,7 @@ const labelFace = async (req, res, next) => {
     await face.save();
 
     try {
-      const photo = await Photo.findById(face.photoId).lean();
+      const photo = await Photo.findOne({ _id: face.photoId, ownerId: userId }).lean();
       if (photo?.imageUrl) {
         const dpUrl = await uploadPersonDpFromImageUrl({
           imageUrl: photo.imageUrl,
@@ -181,6 +187,12 @@ const labelFace = async (req, res, next) => {
     } catch (_error) {
       // DP generation failure should never block labeling flow.
     }
+
+    await linkEntitiesToUser({
+      userId,
+      faceIds: [String(face._id)],
+      personIds: [String(person._id)]
+    });
 
     return res.status(200).json({
       success: true,
@@ -203,6 +215,14 @@ const labelFace = async (req, res, next) => {
 
 const confirmPhotoLabels = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const photoId = String(req.body?.photoId || '').trim();
 
     if (!photoId) {
@@ -212,7 +232,15 @@ const confirmPhotoLabels = async (req, res, next) => {
       });
     }
 
-    const faces = await Face.find({ photoId });
+    const photo = await Photo.findOne({ _id: photoId, ownerId: userId }).lean();
+    if (!photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'Photo not found.'
+      });
+    }
+
+    const faces = await Face.find({ photoId, ownerId: userId });
     if (!Array.isArray(faces) || faces.length === 0) {
       return res.status(404).json({
         success: false,
@@ -234,7 +262,7 @@ const confirmPhotoLabels = async (req, res, next) => {
     const personIdsTouched = new Set();
 
     for (const face of toConfirm) {
-      const person = await Person.findById(face.personId);
+      const person = await Person.findOne({ _id: face.personId, ownerId: userId });
       if (!person) {
         return res.status(400).json({
           success: false,
@@ -247,7 +275,6 @@ const confirmPhotoLabels = async (req, res, next) => {
       face.learningConfirmed = true;
       await face.save();
       try {
-        const photo = await Photo.findById(face.photoId).lean();
         if (photo?.imageUrl) {
           const dpUrl = await uploadPersonDpFromImageUrl({
             imageUrl: photo.imageUrl,
@@ -265,6 +292,12 @@ const confirmPhotoLabels = async (req, res, next) => {
       }
       confirmedFaceIds.push(String(face._id));
     }
+
+    await linkEntitiesToUser({
+      userId,
+      faceIds: confirmedFaceIds,
+      personIds: Array.from(personIdsTouched)
+    });
 
     return res.status(200).json({
       success: true,

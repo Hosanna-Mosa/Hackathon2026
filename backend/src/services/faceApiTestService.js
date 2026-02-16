@@ -1,5 +1,5 @@
-require('./tfjsCompat');
-const tf = require('@tensorflow/tfjs-node');
+require('./tensorflowRuntime');
+const { decodeImageBufferToTensor } = require('./tfImageUtils');
 const { getFaceApi } = require('./faceApiLoader');
 const { runFaceApiDetection } = require('./faceApiDetection');
 
@@ -14,7 +14,7 @@ const runFaceApiTest = async (imageBuffer) => {
   try {
     const faceapi = await getFaceApi();
 
-    imageTensor = tf.node.decodeImage(imageBuffer, 3);
+    imageTensor = await decodeImageBufferToTensor(imageBuffer);
 
     const startedAt = Date.now();
     const detections = await faceapi

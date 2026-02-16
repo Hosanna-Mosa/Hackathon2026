@@ -1,6 +1,6 @@
-require('./tfjsCompat');
 const axios = require('axios');
-const tf = require('@tensorflow/tfjs-node');
+const { tf } = require('./tensorflowRuntime');
+const { decodeImageBufferToTensor, tensorToJpegBuffer } = require('./tfImageUtils');
 const { uploadFilesToCloud } = require('./cloudUploadService');
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -32,11 +32,11 @@ const sanitizeBox = (rawBox, imageWidth, imageHeight) => {
   };
 };
 
-const cropFaceJpegFromBuffer = (imageBuffer, rawBox) => {
+const cropFaceJpegFromBuffer = async (imageBuffer, rawBox) => {
   let imageTensor;
   let croppedTensor;
   try {
-    imageTensor = tf.node.decodeImage(imageBuffer, 3);
+    imageTensor = await decodeImageBufferToTensor(imageBuffer);
     const [imageHeight, imageWidth] = imageTensor.shape;
     const safeBox = sanitizeBox(rawBox, imageWidth, imageHeight);
     if (!safeBox) {
@@ -48,8 +48,7 @@ const cropFaceJpegFromBuffer = (imageBuffer, rawBox) => {
       [safeBox.y, safeBox.x, 0],
       [safeBox.height, safeBox.width, 3]
     );
-    const encoded = tf.node.encodeJpeg(croppedTensor, 'rgb', 92);
-    return Buffer.from(encoded);
+    return tensorToJpegBuffer(croppedTensor, 0.92);
   } finally {
     if (croppedTensor) {
       croppedTensor.dispose();
@@ -72,7 +71,7 @@ const uploadPersonDpFromImageBuffer = async ({ imageBuffer, box, fileStem, folde
     return null;
   }
 
-  const cropped = cropFaceJpegFromBuffer(imageBuffer, box);
+  const cropped = await cropFaceJpegFromBuffer(imageBuffer, box);
   if (!Buffer.isBuffer(cropped) || cropped.length === 0) {
     return null;
   }

@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const deliverySchema = new mongoose.Schema(
   {
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     person: {
       type: String,
       required: true,

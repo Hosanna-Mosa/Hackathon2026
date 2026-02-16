@@ -46,12 +46,21 @@ const buildDateFilter = (dateFrom, dateTo) => {
 
 const getPhotos = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const { person, dateFrom, dateTo } = req.query;
     const dateFilter = buildDateFilter(dateFrom, dateTo);
 
     if (person) {
       const safePerson = escapeRegex(String(person).trim());
       const personDoc = await Person.findOne({
+        ownerId: userId,
         name: { $regex: `^${safePerson}$`, $options: 'i' }
       });
 
@@ -59,12 +68,13 @@ const getPhotos = async (req, res, next) => {
         return res.status(200).json({ photos: [], count: 0 });
       }
 
-      const photoIds = await Face.distinct('photoId', { personId: personDoc._id });
+      const photoIds = await Face.distinct('photoId', { ownerId: userId, personId: personDoc._id });
       if (!Array.isArray(photoIds) || photoIds.length === 0) {
         return res.status(200).json({ photos: [], count: 0 });
       }
 
       const photoQuery = {
+        ownerId: userId,
         _id: { $in: photoIds }
       };
       if (dateFilter?.createdAt) {
@@ -79,7 +89,11 @@ const getPhotos = async (req, res, next) => {
       });
     }
 
-    const photos = await Photo.find(dateFilter || {}).sort({ createdAt: -1 });
+    const query = {
+      ownerId: userId,
+      ...(dateFilter || {})
+    };
+    const photos = await Photo.find(query).sort({ createdAt: -1 });
 
     return res.status(200).json({ photos, count: photos.length });
   } catch (error) {

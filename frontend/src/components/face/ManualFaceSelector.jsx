@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, Check, Pencil, SquareDashedMousePointer } from "lucide-react";
+import { manualFaceLabelApi } from "@/lib/api";
 
 const MIN_BOX_SIZE = 24;
 
@@ -9,7 +10,6 @@ const ManualFaceSelector = ({
   imageSrc,
   photoId,
   autoFacesCount = 0,
-  apiBaseUrl = (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) || "http://localhost:8000",
   onSaved,
 }) => {
   const imageRef = useRef(null);
@@ -176,17 +176,9 @@ const ManualFaceSelector = ({
         name: trimmedName,
       };
 
-      const response = await fetch(`${String(apiBaseUrl).replace(/\/$/, "")}/api/manual-face`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(result?.message || "Failed to save manual face label.");
+      const result = await manualFaceLabelApi(payload);
+      if (!result?.success) {
+        throw new Error("Failed to save manual face label.");
       }
 
       if (result?.face) {

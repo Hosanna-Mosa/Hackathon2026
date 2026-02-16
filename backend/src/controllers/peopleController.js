@@ -1,22 +1,40 @@
+const mongoose = require('mongoose');
+
 const Person = require('../models/Person');
 const { runFaceApiDetection } = require('../services/faceApiDetection');
 const { uploadPersonDpFromImageBuffer } = require('../services/personDpService');
+const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 const LABEL_MIN_FACE_CONFIDENCE = Number(process.env.LABEL_MIN_FACE_CONFIDENCE || 0.9);
 
-const getPeople = async (_req, res, next) => {
+const getPeople = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
+    const ownerObjectId = new mongoose.Types.ObjectId(userId);
     const results = await Person.aggregate([
+      {
+        $match: {
+          ownerId: ownerObjectId
+        }
+      },
       {
         $lookup: {
           from: 'faces',
-          let: { personId: '$_id' },
+          let: { personId: '$_id', ownerId: '$ownerId' },
           pipeline: [
             {
               $match: {
-                $expr: { $eq: ['$personId', '$$personId'] }
+                $expr: {
+                  $and: [{ $eq: ['$personId', '$$personId'] }, { $eq: ['$ownerId', '$$ownerId'] }]
+                }
               }
             },
             {
@@ -90,6 +108,14 @@ const getPeople = async (_req, res, next) => {
 
 const createPerson = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const name = normalizePersonName(req.body?.name);
 
     if (!name) {
@@ -105,10 +131,7 @@ const createPerson = async (req, res, next) => {
       });
     }
 
-    const safeName = escapeRegex(name);
-    const existing = await Person.findOne({
-      name: { $regex: `^${safeName}$`, $options: 'i' }
-    });
+    const existing = await Person.findOne({ ownerId: userId, name });
 
     if (existing) {
       return res.status(409).json({
@@ -151,10 +174,16 @@ const createPerson = async (req, res, next) => {
     const embedding = Array.isArray(bestFace?.embedding) ? bestFace.embedding : [];
 
     const person = await Person.create({
+      ownerId: userId,
       name,
       embeddings: embedding.length > 0 ? [embedding] : [],
       averageEmbedding: embedding.length > 0 ? embedding : [],
       imageUrl
+    });
+
+    await linkEntitiesToUser({
+      userId,
+      personIds: [String(person._id)]
     });
 
     return res.status(201).json({

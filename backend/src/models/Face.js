@@ -2,6 +2,12 @@ const mongoose = require('mongoose');
 
 const faceSchema = new mongoose.Schema(
   {
+    ownerId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
     photoId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Photo',
