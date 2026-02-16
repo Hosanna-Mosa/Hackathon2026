@@ -14,6 +14,12 @@ const personSchema = new mongoose.Schema(
       trim: true,
       lowercase: true
     },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: ''
+    },
     embeddings: {
       // Learning memory: one embedding per confirmed label event.
       type: [[Number]],
