@@ -1,7 +1,20 @@
 const axios = require('axios');
-const { tf } = require('./tensorflowRuntime');
-const { decodeImageBufferToTensor, tensorToJpegBuffer } = require('./tfImageUtils');
+const tf = require('@tensorflow/tfjs');
+const canvas = require('canvas');
 const { uploadFilesToCloud } = require('./cloudUploadService');
+
+
+const imageBufferToTensor = async (imageBuffer) => {
+  const image = await canvas.loadImage(imageBuffer);
+  const drawCanvas = canvas.createCanvas(image.width, image.height);
+  const ctx = drawCanvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, image.width, image.height);
+  const { data } = ctx.getImageData(0, 0, image.width, image.height);
+  return tf.tidy(() => {
+    const rgbaTensor = tf.tensor3d(data, [image.height, image.width, 4], 'int32');
+    return rgbaTensor.slice([0, 0, 0], [image.height, image.width, 3]);
+  });
+};
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const toNumber = (value, fallback = 0) => {
@@ -36,7 +49,7 @@ const cropFaceJpegFromBuffer = async (imageBuffer, rawBox) => {
   let imageTensor;
   let croppedTensor;
   try {
-    imageTensor = await decodeImageBufferToTensor(imageBuffer);
+    imageTensor = await imageBufferToTensor(imageBuffer);
     const [imageHeight, imageWidth] = imageTensor.shape;
     const safeBox = sanitizeBox(rawBox, imageWidth, imageHeight);
     if (!safeBox) {
@@ -48,7 +61,21 @@ const cropFaceJpegFromBuffer = async (imageBuffer, rawBox) => {
       [safeBox.y, safeBox.x, 0],
       [safeBox.height, safeBox.width, 3]
     );
-    return tensorToJpegBuffer(croppedTensor, 0.92);
+
+    const data = await croppedTensor.data();
+    const [h, w] = croppedTensor.shape;
+    const outCanvas = canvas.createCanvas(w, h);
+    const ctx = outCanvas.getContext('2d');
+    const imageData = ctx.createImageData(w, h);
+
+    for (let i = 0, j = 0; i < data.length; i += 3, j += 4) {
+      imageData.data[j] = data[i];
+      imageData.data[j + 1] = data[i + 1];
+      imageData.data[j + 2] = data[i + 2];
+      imageData.data[j + 3] = 255;
+    }
+    ctx.putImageData(imageData, 0, 0);
+    return outCanvas.toBuffer('image/jpeg', { quality: 0.92 });
   } finally {
     if (croppedTensor) {
       croppedTensor.dispose();

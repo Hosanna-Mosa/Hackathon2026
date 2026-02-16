@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { Send, Sparkles, Bot, Mic, Plus, Clock, MoreVertical } from "lucide-react";
 import { chatWithAgentApi, type Photo } from "@/lib/api";
@@ -19,6 +20,7 @@ type ChatMessage = {
 };
 
 const AIAssistant = () => {
+  const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -55,6 +57,13 @@ const AIAssistant = () => {
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
+
+      if (response.result.data?.navigate && response.result.data?.targetUrl) {
+        setTimeout(() => {
+          navigate(response.result.data.targetUrl as string);
+        }, 1500);
+      }
+
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -103,15 +112,21 @@ const AIAssistant = () => {
                   <div className="max-w-2xl rounded-xl rounded-tl-none border border-border bg-card p-4 text-sm text-foreground">
                     <p>{msg.text}</p>
                     {msg.photos && msg.photos.length > 0 && (
-                      <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
-                        {msg.photos.slice(0, 6).map((photo) => (
-                          <img
-                            key={photo._id}
-                            src={resolvePhotoUrl(photo.imageUrl || photo.path, photo.filename)}
-                            alt={photo.filename || "Assistant result photo"}
-                            className="aspect-video rounded-lg object-cover"
-                          />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {msg.photos.slice(0, 8).map((photo) => (
+                          <div key={photo._id} className="relative h-24 w-24 overflow-hidden rounded-lg border border-border">
+                            <img
+                              src={resolvePhotoUrl(photo.imageUrl || photo.path, photo.filename)}
+                              alt={photo.filename || "Assistant result photo"}
+                              className="h-full w-full object-cover transition-transform hover:scale-110"
+                            />
+                          </div>
                         ))}
+                        {msg.photos.length > 8 && (
+                          <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-secondary text-xs font-medium text-muted-foreground">
+                            +{msg.photos.length - 8} more
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
