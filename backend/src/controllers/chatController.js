@@ -4,7 +4,6 @@ const Photo = require('../models/Photo');
 const Delivery = require('../models/Delivery');
 const Face = require('../models/Face');
 const Person = require('../models/Person');
-const { getGroqAgentDecision } = require('../services/groqService');
 const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -188,21 +187,6 @@ const chatWithAgent = async (req, res, next) => {
           result.message = "Sorry, I didn't verify that command. Try asking to 'Show photos', 'Count photos', or 'Send photos'.";
         }
         break;
-    const action = decision?.action || 'chat_reply';
-
-    let payload;
-
-    if (action === 'get_photos') {
-      payload = await handleGetPhotosIntent(decision, userId);
-    } else if (action === 'log_delivery') {
-      payload = await handleDeliveryIntent(decision, userId);
-    } else {
-      payload = {
-        action: 'chat_reply',
-        message:
-          'I can help with photo lookup and delivery logging. Try: "show my photos" or "send delivery to John on whatsapp".',
-        data: { decision }
-      };
     }
 
     return res.status(200).json({
