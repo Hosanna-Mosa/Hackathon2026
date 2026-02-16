@@ -9,6 +9,7 @@ import ManualFaceSelector from "@/components/face/ManualFaceSelector";
 
 const FACE_MATCH_MIN_SIMILARITY = 0.95;
 const FACE_AMBIGUOUS_MAX_GAP = 0.02;
+const INVALID_LABELS = new Set(["unknown", "unknown_person", "unknown person"]);
 
 const getFaceStatus = (face: UploadedPhoto["faces"][number]) => {
   if (face.learningConfirmed) {
@@ -116,6 +117,10 @@ const UploadCenter = () => {
     const name = (nameFromOverlay || "").trim();
     if (!name) {
       setError("Please enter a name before saving a face label.");
+      return;
+    }
+    if (INVALID_LABELS.has(name.toLowerCase())) {
+      setError('Please enter a real person name. "unknown" is not allowed as a saved label.');
       return;
     }
 

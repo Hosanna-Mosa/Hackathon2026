@@ -6,6 +6,7 @@ const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const DUPLICATE_SIMILARITY_THRESHOLD = Number(process.env.EMBEDDING_DUPLICATE_SIMILARITY_THRESHOLD || 0.9995);
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
+const INVALID_PERSON_LABELS = new Set(['unknown', 'unknown_person', 'unknown person']);
 
 const toVector = (value) => (Array.isArray(value) ? value.map((v) => Number(v) || 0) : []);
 const normalizeEmbeddingBank = (value) => {
@@ -129,6 +130,13 @@ const labelFace = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Both faceId and name are required.'
+      });
+    }
+
+    if (INVALID_PERSON_LABELS.has(name)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a real person name. "unknown" labels are not allowed.'
       });
     }
 

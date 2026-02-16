@@ -4,9 +4,43 @@ const Photo = require('../models/Photo');
 const Delivery = require('../models/Delivery');
 const Face = require('../models/Face');
 const Person = require('../models/Person');
+const ChatHistory = require('../models/ChatHistory');
 const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const normalizeHistoryLimit = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 50;
+  return Math.min(Math.max(Math.trunc(parsed), 1), 200);
+};
+
+const storeChatHistory = async ({
+  userId,
+  prompt,
+  status = 'success',
+  agentDecision = null,
+  result = null,
+  errorMessage = null
+}) => {
+  if (!userId || !prompt) return;
+  try {
+    await ChatHistory.create({
+      ownerId: userId,
+      prompt,
+      command: prompt,
+      status,
+      agentDecision,
+      assistant: {
+        action: result?.action || 'unknown',
+        message: result?.message || '',
+        data: result?.data || null
+      },
+      errorMessage: errorMessage || null
+    });
+  } catch (historyError) {
+    console.error('Chat History Persist Error:', historyError);
+  }
+};
 
 const handleGetPhotosIntent = async (decision, userId) => {
   const personFilter = decision?.person || null;
@@ -76,8 +110,10 @@ const handleDeliveryIntent = async (decision, userId) => {
 };
 
 const chatWithAgent = async (req, res, next) => {
+  let userId = '';
+  let userPrompt = '';
   try {
-    const userId = String(req.userId || '').trim();
+    userId = String(req.userId || '').trim();
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -85,24 +121,32 @@ const chatWithAgent = async (req, res, next) => {
       });
     }
 
-    const { message } = req.body;
-
-    if (!message) {
+    const { message } = req.body || {};
+    userPrompt = String(message || '').trim();
+    if (!userPrompt) {
       return res.status(400).json({ message: 'message is required in request body.' });
     }
 
     // 1. Get structured intent from Groq
-    const decision = await getGroqAgentDecision(message);
+    const decision = await getGroqAgentDecision(userPrompt);
     console.log('Agent Decision:', decision);
 
     if (!decision || !decision.intent) {
+      const fallbackResult = {
+        action: 'unknown',
+        message: "Sorry, I didn't understand your request."
+      };
+      await storeChatHistory({
+        userId,
+        prompt: userPrompt,
+        status: 'success',
+        agentDecision: decision || null,
+        result: fallbackResult
+      });
       return res.json({
         success: true,
         agentDecision: decision,
-        result: {
-          action: 'unknown',
-          message: "Sorry, I didn't understand your request."
-        }
+        result: fallbackResult
       });
     }
 
@@ -118,7 +162,15 @@ const chatWithAgent = async (req, res, next) => {
     switch (intent.toLowerCase()) {
       case 'search_photos':
       case 'get_latest_uploads': // searchPhotos already sorts by date descending
-        const photos = await photoService.searchPhotos({ person, event, location, date_range, tags: [], count });
+        const photos = await photoService.searchPhotos({
+          person,
+          event,
+          location,
+          date_range,
+          tags: [],
+          count,
+          ownerId: userId
+        });
         const hasPhotos = photos.length > 0;
 
         result.message = hasPhotos
@@ -145,7 +197,14 @@ const chatWithAgent = async (req, res, next) => {
         break;
 
       case 'count_photos':
-        const total = await photoService.countPhotos({ person, event, location, date_range, tags: [] });
+        const total = await photoService.countPhotos({
+          person,
+          event,
+          location,
+          date_range,
+          tags: [],
+          ownerId: userId
+        });
         let msg = '';
         if (person) msg = `You have ${total} photos of ${person}.`;
         else if (event) msg = `You have ${total} photos from the ${event}.`;
@@ -156,13 +215,13 @@ const chatWithAgent = async (req, res, next) => {
         break;
 
       case 'send_photos':
-        const sendResult = await photoService.sendPhotos({ person, platform, count });
+        const sendResult = await photoService.sendPhotos({ person, platform, count, ownerId: userId });
         result.message = sendResult.message;
         result.data = sendResult;
         break;
 
       case 'get_most_photos':
-        const most = await photoService.getStats('most_photos');
+        const most = await photoService.getStats('most_photos', userId);
         result.message = most
           ? `${most.person} has the most photos (${most.count}).`
           : "Not enough data to determine statistics.";
@@ -170,7 +229,7 @@ const chatWithAgent = async (req, res, next) => {
         break;
 
       case 'get_least_photos':
-        const least = await photoService.getStats('least_photos');
+        const least = await photoService.getStats('least_photos', userId);
         result.message = least
           ? `${least.person} has the least photos (${least.count}).`
           : "Not enough data to determine statistics.";
@@ -180,7 +239,7 @@ const chatWithAgent = async (req, res, next) => {
       case 'unknown':
       default:
         // Attempt to catch basic greetings if Groq categorized them as unknown
-        if (message.match(/^(hi|hello|hey)/i)) {
+        if (userPrompt.match(/^(hi|hello|hey)/i)) {
           result.message = "Hi there! I'm Drishyamitra. I can help find photos, count them, or show you stats. Try 'Show photos of John'!";
           result.action = 'chat_reply';
         } else {
@@ -188,6 +247,14 @@ const chatWithAgent = async (req, res, next) => {
         }
         break;
     }
+
+    await storeChatHistory({
+      userId,
+      prompt: userPrompt,
+      status: 'success',
+      agentDecision: decision,
+      result
+    });
 
     return res.status(200).json({
       success: true,
@@ -197,10 +264,47 @@ const chatWithAgent = async (req, res, next) => {
 
   } catch (error) {
     console.error('Chat Controller Error:', error);
+    await storeChatHistory({
+      userId,
+      prompt: userPrompt,
+      status: 'failed',
+      result: {
+        action: 'error',
+        message: 'Failed to process your request.'
+      },
+      errorMessage: error?.message || 'Unknown error'
+    });
     next(error);
   }
 };
 
+const getChatHistory = async (req, res, next) => {
+  try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
+    const limit = normalizeHistoryLimit(req.query.limit);
+    const history = await ChatHistory.find({ ownerId: userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      count: history.length,
+      history
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
-  chatWithAgent
+  chatWithAgent,
+  getChatHistory
 };

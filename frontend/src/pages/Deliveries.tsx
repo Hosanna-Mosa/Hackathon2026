@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle, Clock, Filter, Loader2, MessageCircle, XCircle } from "lucide-react";
+import { CheckCircle, Clock, Loader2, MessageCircle, XCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   createDeliveryApi,
   getDeliveriesApi,
@@ -84,12 +83,12 @@ const Deliveries = () => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const [selectedStatuses, setSelectedStatuses] = useState<Record<StatusFilter, boolean>>({
+  const [selectedStatuses] = useState<Record<StatusFilter, boolean>>({
     sent: true,
     pending: true,
     failed: true,
   });
-  const [selectedPlatforms, setSelectedPlatforms] = useState<Record<PlatformFilter, boolean>>({
+  const [selectedPlatforms] = useState<Record<PlatformFilter, boolean>>({
     email: true,
     whatsapp: true,
     direct_link: true,
@@ -215,19 +214,8 @@ const Deliveries = () => {
     }
   };
 
-  const toggleStatus = (key: StatusFilter, checked: boolean) => {
-    setSelectedStatuses((prev) => ({ ...prev, [key]: checked }));
-  };
-
-  const togglePlatform = (key: PlatformFilter, checked: boolean) => {
-    setSelectedPlatforms((prev) => ({ ...prev, [key]: checked }));
-  };
-
   return (
     <div className="animate-fade-in">
-      <div className="mb-1 text-sm text-muted-foreground">
-        <span>DASHBOARD</span> / <span className="font-medium text-primary">DELIVERY HISTORY</span>
-      </div>
 
       <div className="mb-6 flex items-start justify-between">
         <div>
@@ -259,54 +247,8 @@ const Deliveries = () => {
         </div>
       </div>
 
-      <div className="flex gap-6">
-        <div className="w-56 space-y-6">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Filter className="h-4 w-4 text-muted-foreground" />
-              <span className="font-semibold text-foreground">Filters</span>
-            </div>
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase text-primary">Status</p>
-              <div className="space-y-2">
-                {(["sent", "pending", "failed"] as StatusFilter[]).map((status) => (
-                  <label key={status} className="flex items-center gap-2 text-sm text-foreground">
-                    <Checkbox
-                      checked={selectedStatuses[status]}
-                      onCheckedChange={(value) => toggleStatus(status, value === true)}
-                    />
-                    {statusLabel(status)}
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="mt-4">
-              <p className="mb-2 text-xs font-semibold uppercase text-primary">Platform</p>
-              <div className="space-y-2">
-                {(["email", "whatsapp", "direct_link"] as PlatformFilter[]).map((platformType) => (
-                  <label key={platformType} className="flex items-center gap-2 text-sm text-foreground">
-                    <Checkbox
-                      checked={selectedPlatforms[platformType]}
-                      onCheckedChange={(value) => togglePlatform(platformType, value === true)}
-                    />
-                    {platformLabel(platformType)}
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-4">
-            <p className="font-semibold text-primary">Need Help?</p>
-            <p className="mt-1 text-xs text-muted-foreground">Our AI assistant can help automate your delivery preferences.</p>
-            <button className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground">
-              <MessageCircle className="h-4 w-4" />
-              Ask Chatbot
-            </button>
-          </div>
-        </div>
-
-        <div className="flex-1">
+      <div className="space-y-6">
+        <div>
           <div className="mb-6 rounded-xl border-2 border-warning/40 bg-card p-4">
             <Badge className="mb-2 bg-warning text-[10px] text-warning-foreground">Manual Delivery</Badge>
             <p className="font-semibold text-foreground">Create or send delivery</p>

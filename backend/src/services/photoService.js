@@ -3,6 +3,8 @@ const Person = require('../models/Person');
 const Face = require('../models/Face');
 const Delivery = require('../models/Delivery');
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Resolves a date string into a MongoDB date range query.
  * Handles: "today", "yesterday", "last week", "last month", "last year", "2024", "YYYY-MM-DD"
@@ -57,27 +59,34 @@ const parseDateRange = (dateStr) => {
  * Builds a MongoDB query object based on structured parameters.
  */
 const buildPhotoQuery = async (params) => {
-    const query = {};
-    const { person, event, location, date_range, tags } = params;
+    const { person, event, location, date_range, tags, ownerId } = params;
+    const query = ownerId ? { ownerId } : {};
 
     // 1. Person Filter (Complex because it involves Face join)
     let photoIdsFromFaces = null;
 
     if (person) {
+        const safePerson = escapeRegex(person.trim());
+        const personBaseQuery = ownerId ? { ownerId } : {};
+
         // Try to find the person
         const personDoc = await Person.findOne({
-            name: { $regex: new RegExp(`^${person.trim()}$`, 'i') }
+            ...personBaseQuery,
+            name: { $regex: new RegExp(`^${safePerson}$`, 'i') }
         }) || await Person.findOne({
-            name: { $regex: new RegExp(`${person.trim()}`, 'i') }
+            ...personBaseQuery,
+            name: { $regex: new RegExp(safePerson, 'i') }
         });
 
         if (personDoc) {
-            const faces = await Face.find({ personId: personDoc._id }).select('photoId');
+            const faceQuery = ownerId
+                ? { ownerId, personId: personDoc._id }
+                : { personId: personDoc._id };
+            const faces = await Face.find(faceQuery).select('photoId');
             photoIdsFromFaces = faces.map(f => f.photoId);
         } else {
-            // If specific person requested but not found, ensure no results (or handle gracefully)
-            // For now, return a query that finds nothing
-            return { _id: { $in: [] } };
+            // Fallback for legacy photo documents where names may be in detectedPersons.
+            query.detectedPersons = { $elemMatch: { $regex: new RegExp(`^${safePerson}$`, 'i') } };
         }
     }
 
@@ -107,6 +116,9 @@ const buildPhotoQuery = async (params) => {
 
     // Combine Photo IDs from Person lookup
     if (photoIdsFromFaces !== null) {
+        if (photoIdsFromFaces.length === 0) {
+            return { ...query, _id: { $in: [] } };
+        }
         query._id = { $in: photoIdsFromFaces };
     }
 
@@ -131,10 +143,11 @@ const countPhotos = async (params) => {
     return count;
 };
 
-const getStats = async (metric) => {
+const getStats = async (metric, ownerId) => {
     if (metric === 'most_photos' || metric === 'least_photos') {
         const sort = metric === 'most_photos' ? -1 : 1;
         const stats = await Face.aggregate([
+            ...(ownerId ? [{ $match: { ownerId } }] : []),
             {
                 $group: {
                     _id: '$personId',
@@ -159,7 +172,10 @@ const getStats = async (metric) => {
         console.log('DEBUG STATS:', JSON.stringify(stats));
 
         if (stats.length > 0) {
-            const person = await Person.findById(stats[0]._id);
+            const person = await Person.findOne({
+                _id: stats[0]._id,
+                ...(ownerId ? { ownerId } : {})
+            });
             return {
                 person: person ? person.name : 'Unknown',
                 count: stats[0].count,
@@ -173,12 +189,13 @@ const getStats = async (metric) => {
 const sendPhotos = async (params) => {
     // Simulation of sending
     // In a real app, this would use a messaging service
-    const { person, platform, count } = params;
+    const { person, platform, count, ownerId } = params;
     const recipient = person || "requested contact";
     const channel = platform || "email";
 
     // Log the action
     await Delivery.create({
+        ownerId,
         person: recipient,
         type: channel,
         timestamp: new Date()

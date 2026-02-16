@@ -22,12 +22,20 @@ const parseCsv = (value) =>
 
 const getDeliveries = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const typeFilters = parseCsv(req.query?.types).filter((type) => ALLOWED_TYPES.has(type));
     const statusFilters = parseCsv(req.query?.statuses).map(normalizeStatus).filter((status) => ALLOWED_STATUSES.has(status));
     const limitRaw = Number(req.query?.limit || 50);
     const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
 
-    const query = {};
+    const query = { ownerId: userId };
     if (typeFilters.length > 0) {
       query.type = { $in: typeFilters };
     }
@@ -81,6 +89,14 @@ const getDeliveries = async (req, res, next) => {
 
 const createDeliveryLog = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const person = String(req.body?.person || '').trim();
     const type = normalizeType(req.body?.type || 'email');
     const status = normalizeStatus(req.body?.status || 'pending');
@@ -105,6 +121,7 @@ const createDeliveryLog = async (req, res, next) => {
     }
 
     const delivery = await Delivery.create({
+      ownerId: userId,
       person,
       type,
       status,
@@ -127,6 +144,14 @@ const createDeliveryLog = async (req, res, next) => {
 
 const updateDeliveryStatus = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const deliveryId = String(req.params?.deliveryId || '').trim();
     const status = normalizeStatus(req.body?.status);
     const errorMessage = String(req.body?.errorMessage || '').trim();
@@ -139,7 +164,7 @@ const updateDeliveryStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'status must be one of: pending, sent, failed.' });
     }
 
-    const delivery = await Delivery.findById(deliveryId);
+    const delivery = await Delivery.findOne({ _id: deliveryId, ownerId: userId });
     if (!delivery) {
       return res.status(404).json({ success: false, message: 'Delivery not found.' });
     }
@@ -168,6 +193,14 @@ const updateDeliveryStatus = async (req, res, next) => {
 
 const sendEmailDelivery = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const person = String(req.body?.person || '').trim();
     const recipientEmail = String(req.body?.recipientEmail || '').trim().toLowerCase();
     const subject = String(req.body?.subject || '').trim();
@@ -187,6 +220,7 @@ const sendEmailDelivery = async (req, res, next) => {
     }
 
     const delivery = await Delivery.create({
+      ownerId: userId,
       person,
       type: 'email',
       recipientEmail,

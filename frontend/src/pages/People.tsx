@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, Merge, Plus, SlidersHorizontal, Sparkles, Users } from "lucide-react";
+import { ArrowUpRight, Merge, Plus, SlidersHorizontal, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { createPersonApi, getPeopleApi, type PersonSummary } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
+
+const INVALID_LABELS = new Set(["unknown", "unknown_person", "unknown person"]);
 
 const People = () => {
   const navigate = useNavigate();
@@ -43,6 +45,10 @@ const People = () => {
     const name = newPersonName.trim();
     if (!name) {
       setActionError("Please enter a person name.");
+      return;
+    }
+    if (INVALID_LABELS.has(name.toLowerCase())) {
+      setActionError('Please enter a real person name. "unknown" is not allowed.');
       return;
     }
     if (!newPersonPhoto) {
@@ -109,7 +115,7 @@ const People = () => {
         </div>
       </header>
 
-      <div className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
+      <div className="grid gap-6">
         <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
             <p className="text-base font-semibold text-foreground">People Directory</p>
@@ -190,7 +196,7 @@ const People = () => {
           )}
         </section>
 
-        <aside className="space-y-4">
+        <aside>
           <section className="rounded-2xl border border-border bg-card p-4 sm:p-5">
             <div className="mb-4 flex items-center gap-2">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
@@ -240,20 +246,6 @@ const People = () => {
                 {isCreating ? "Saving..." : "Save Label"}
               </button>
               {actionError && <p className="text-xs text-destructive">{actionError}</p>}
-            </div>
-          </section>
-
-          <section className="rounded-2xl bg-primary px-4 py-4 text-primary-foreground sm:px-5">
-            <div className="flex items-start gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-foreground/20">
-                <Sparkles className="h-5 w-5" />
-              </div>
-              <div>
-                <h3 className="font-semibold">AI Smart Cleaning</h3>
-                <p className="mt-1 text-xs text-primary-foreground/85">
-                  Duplicate and blur cleanup recommendations will appear here.
-                </p>
-              </div>
             </div>
           </section>
         </aside>

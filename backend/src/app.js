@@ -30,17 +30,10 @@ app.use('/api/upload', protect, uploadRoutes);
 app.use('/api/photos', protect, galleryRoutes);
 app.use('/api/chat', protect, chatRoutes);
 app.use('/api/people', protect, peopleRoutes);
+app.use('/api/deliveries', protect, deliveryRoutes);
 app.use('/api', protect, labelRoutes);
 app.use('/api', protect, manualFaceRoutes);
 app.use('/api', protect, faceApiTestRoutes);
-app.use('/api/upload', uploadRoutes);
-app.use('/api/photos', galleryRoutes);
-app.use('/api/chat', chatRoutes);
-app.use('/api/people', peopleRoutes);
-app.use('/api/deliveries', deliveryRoutes);
-app.use('/api', labelRoutes);
-app.use('/api', manualFaceRoutes);
-app.use('/api', faceApiTestRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

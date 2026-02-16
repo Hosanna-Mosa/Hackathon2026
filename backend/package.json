@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "db:clear": "node scripts/clearDb.js",
-    "db:backfill-person-dp": "node scripts/backfillPersonDp.js"
+    "db:backfill-person-dp": "node scripts/backfillPersonDp.js",
+    "db:remove-unknown-labels": "node scripts/removeUnknownLabels.js"
   },
   "keywords": [
     "express",

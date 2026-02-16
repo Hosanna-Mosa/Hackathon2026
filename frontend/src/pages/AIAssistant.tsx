@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Send, Sparkles, Bot, Mic, Plus, Clock, MoreVertical } from "lucide-react";
-import { chatWithAgentApi, type Photo } from "@/lib/api";
+import { chatWithAgentApi, getChatHistoryApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 
 const suggestedQueries = [
@@ -23,13 +23,59 @@ const AIAssistant = () => {
   const navigate = useNavigate();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const initialAssistantMessage: ChatMessage = {
+    id: "init",
+    role: "assistant",
+    text: "AI Assistant is online. Ask me to fetch photos or log a delivery action.",
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "init",
-      role: "assistant",
-      text: "AI Assistant is online. Ask me to fetch photos or log a delivery action.",
-    },
+    initialAssistantMessage,
   ]);
+
+  useEffect(() => {
+    let active = true;
+    const loadHistory = async () => {
+      try {
+        const response = await getChatHistoryApi(50);
+        if (!active) return;
+
+        const rebuilt = response.history
+          .slice()
+          .reverse()
+          .flatMap((entry) => {
+            const assistantText =
+              entry.status === "failed"
+                ? entry.errorMessage || "Failed to process request."
+                : entry.assistant?.message || "No assistant response.";
+            return [
+              {
+                id: `history-user-${entry._id}`,
+                role: "user" as const,
+                text: entry.prompt,
+              },
+              {
+                id: `history-assistant-${entry._id}`,
+                role: "assistant" as const,
+                text: assistantText,
+                action: entry.assistant?.action,
+                photos: entry.assistant?.data?.photos || [],
+              },
+            ];
+          });
+
+        setMessages(rebuilt.length > 0 ? rebuilt : [initialAssistantMessage]);
+      } catch (_error) {
+        if (active) {
+          setMessages([initialAssistantMessage]);
+        }
+      }
+    };
+
+    loadHistory();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const sendMessage = async (rawMessage?: string) => {
     const message = (rawMessage ?? input).trim();
@@ -90,14 +136,6 @@ const AIAssistant = () => {
               <p className="font-semibold text-foreground">AI Assistant</p>
               <p className="text-xs text-success">● SYSTEM ONLINE</p>
             </div>
-          </div>
-          <div className="flex gap-2">
-            <button className="rounded-lg p-2 text-muted-foreground hover:bg-accent" type="button">
-              <Clock className="h-4 w-4" />
-            </button>
-            <button className="rounded-lg p-2 text-muted-foreground hover:bg-accent" type="button">
-              <MoreVertical className="h-4 w-4" />
-            </button>
           </div>
         </div>
 
@@ -168,9 +206,6 @@ const AIAssistant = () => {
 
         <div className="border-t border-border p-4">
           <div className="flex items-center gap-3">
-            <button className="rounded-lg p-2 text-muted-foreground hover:bg-accent" type="button">
-              <Plus className="h-5 w-5" />
-            </button>
             <input
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -182,9 +217,6 @@ const AIAssistant = () => {
               placeholder="Ask Drishyamitra to find a memory..."
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
             />
-            <button className="rounded-lg p-2 text-muted-foreground hover:bg-accent" type="button">
-              <Mic className="h-5 w-5" />
-            </button>
             <button
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               type="button"

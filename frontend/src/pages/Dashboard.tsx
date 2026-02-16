@@ -2,15 +2,37 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Image, Users, Package, Sparkles, ArrowRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import StatsCard from "@/components/dashboard/StatsCard";
-import { getPeopleApi, getPhotosApi, type PersonSummary, type Photo } from "@/lib/api";
+import {
+  getChatHistoryApi,
+  getDeliveriesApi,
+  getPeopleApi,
+  getPhotosApi,
+  type ChatHistoryEntry,
+  type PersonSummary,
+  type Photo,
+} from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
+
+const isToday = (value?: string) => {
+  if (!value) return false;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+  const now = new Date();
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+};
 
 const Dashboard = () => {
   const navigate = useNavigate();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [people, setPeople] = useState<PersonSummary[]>([]);
+  const [totalDeliveries, setTotalDeliveries] = useState(0);
+  const [aiActionsToday, setAiActionsToday] = useState(0);
+  const [chatHistory, setChatHistory] = useState<ChatHistoryEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
@@ -19,9 +41,21 @@ const Dashboard = () => {
       try {
         setIsLoading(true);
         setLoadError("");
-        const [photosData, peopleData] = await Promise.all([getPhotosApi(), getPeopleApi()]);
+        const [photosData, peopleData, deliveriesData, chatHistoryData] = await Promise.all([
+          getPhotosApi(),
+          getPeopleApi(),
+          getDeliveriesApi({ limit: 1 }),
+          getChatHistoryApi(200),
+        ]);
+
         setPhotos(Array.isArray(photosData?.photos) ? photosData.photos : []);
         setPeople(Array.isArray(peopleData?.people) ? peopleData.people : []);
+        setTotalDeliveries(Number(deliveriesData?.stats?.total || 0));
+        const todayActions = Array.isArray(chatHistoryData?.history)
+          ? chatHistoryData.history.filter((entry) => isToday(entry.createdAt)).length
+          : 0;
+        setAiActionsToday(todayActions);
+        setChatHistory(Array.isArray(chatHistoryData?.history) ? chatHistoryData.history : []);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : "Failed to load dashboard stats.");
       } finally {
@@ -35,6 +69,19 @@ const Dashboard = () => {
   const totalPhotos = photos.length;
   const recognizedPeople = people.length;
   const recentUploads = useMemo(() => photos.slice(0, 6), [photos]);
+  const recentAiActivities = useMemo(() => {
+    const entries: string[] = [];
+    if (chatHistory.length > 0) {
+      const latestPrompt = String(chatHistory[0]?.prompt || "").trim();
+      if (latestPrompt) {
+        entries.push(`Latest command: "${latestPrompt}"`);
+      }
+    }
+    entries.push(`${aiActionsToday} AI actions processed today.`);
+    entries.push(`${recognizedPeople} people recognized in memory.`);
+    entries.push(`${totalDeliveries} delivery actions logged.`);
+    return entries.slice(0, 3);
+  }, [aiActionsToday, chatHistory, recognizedPeople, totalDeliveries]);
 
   return (
     <div className="animate-fade-in space-y-8">
@@ -87,9 +134,9 @@ const Dashboard = () => {
         <StatsCard
           icon={Package}
           iconBg="bg-destructive/10 text-destructive"
-          label="Recent Deliveries"
-          value="12"
-          badge="Later"
+          label="Total Deliveries"
+          value={isLoading ? "..." : totalDeliveries.toLocaleString()}
+          badge={isLoading ? "Loading" : "Live"}
           badgeColor="text-muted-foreground"
           onClick={() => navigate("/deliveries")}
         />
@@ -97,8 +144,8 @@ const Dashboard = () => {
           icon={Sparkles}
           iconBg="bg-success/10 text-success"
           label="AI Actions Today"
-          value="156"
-          badge="Later"
+          value={isLoading ? "..." : aiActionsToday.toLocaleString()}
+          badge={isLoading ? "Loading" : "Live"}
           badgeColor="text-muted-foreground"
           onClick={() => navigate("/assistant")}
         />
@@ -173,42 +220,23 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <div className="mt-5 space-y-4">
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-muted-foreground">FACE INDEXING</span>
-                <span className="font-semibold text-primary">94% Complete</span>
-              </div>
-              <Progress value={94} className="mt-1.5 h-1.5" />
-            </div>
-            <div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-muted-foreground">TAGGING ACCURACY</span>
-                <span className="font-semibold text-success">High Confidence</span>
-              </div>
-              <Progress value={88} className="mt-1.5 h-1.5" />
-            </div>
-          </div>
-
           <div className="mt-5">
             <h3 className="text-xs font-bold text-foreground">RECENT ACTIVITY</h3>
             <ul className="mt-3 space-y-3">
-              <li className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-                Identified <strong className="text-foreground">"Sarah Miller"</strong> in 24 new photos from Lake Trip.
-              </li>
-              <li className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-                Generated smart album <strong className="text-foreground">"Summer BBQ 2023"</strong> based on faces detected.
-              </li>
-              <li className="flex items-start gap-2 text-sm text-muted-foreground">
-                <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
-                Uploaded 240 photos to cloud backup.
-              </li>
+              {recentAiActivities.map((activity, index) => (
+                <li key={`${activity}-${index}`} className="flex items-start gap-2 text-sm text-muted-foreground">
+                  <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary" />
+                  <span>{activity}</span>
+                </li>
+              ))}
             </ul>
           </div>
 
-          <button className="mt-5 w-full rounded-lg border border-border py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent">
+          <button
+            type="button"
+            onClick={() => navigate("/assistant")}
+            className="mt-5 w-full rounded-lg border border-border py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent"
+          >
             VIEW FULL LOGS
           </button>
         </div>
