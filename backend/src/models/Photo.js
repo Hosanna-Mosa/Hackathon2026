@@ -35,6 +35,33 @@ const photoSchema = new mongoose.Schema(
         default: 0,
         min: 0
       }
+    },
+    // Metadata for search
+    event: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true
+    },
+    location: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true
+    },
+    tags: {
+      type: [String],
+      default: [],
+      index: true
+    },
+    date: {
+      type: Date,
+      default: Date.now,
+      index: true
+    },
+    analyzed: {
+      type: Boolean,
+      default: false
     }
   },
   {

@@ -1,6 +1,20 @@
 require('./tfjsCompat');
 const axios = require('axios');
-const tf = require('@tensorflow/tfjs-node');
+const tf = require('@tensorflow/tfjs');
+const canvas = require('canvas');
+
+
+const imageBufferToTensor = async (imageBuffer) => {
+  const image = await canvas.loadImage(imageBuffer);
+  const drawCanvas = canvas.createCanvas(image.width, image.height);
+  const ctx = drawCanvas.getContext('2d');
+  ctx.drawImage(image, 0, 0, image.width, image.height);
+  const { data } = ctx.getImageData(0, 0, image.width, image.height);
+  return tf.tidy(() => {
+    const rgbaTensor = tf.tensor3d(data, [image.height, image.width, 4], 'int32');
+    return rgbaTensor.slice([0, 0, 0], [image.height, image.width, 3]);
+  });
+};
 
 const MIN_BOX_SIZE_PX = Number(process.env.MANUAL_FACE_MIN_BOX_SIZE || 24);
 
@@ -81,7 +95,7 @@ const extractManualFaceEmbedding = async (imageUrl, rawBox) => {
   let imageTensor;
   let cropTensor;
   try {
-    imageTensor = tf.node.decodeImage(Buffer.from(response.data), 3);
+    imageTensor = await imageBufferToTensor(Buffer.from(response.data));
     const [imageHeight, imageWidth] = imageTensor.shape;
 
     const box = assertAndClampBox(rawBox, imageWidth, imageHeight);

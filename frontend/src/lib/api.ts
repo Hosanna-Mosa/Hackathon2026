@@ -221,6 +221,8 @@ export const chatWithAgentApi = async (message: string) => {
       data?: {
         photos?: Photo[];
         delivery?: Record<string, unknown>;
+        navigate?: boolean;
+        targetUrl?: string;
       };
     };
   }>("/api/chat", {
