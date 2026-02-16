@@ -4,6 +4,7 @@ const { uploadFilesToCloud } = require('../services/cloudUploadService');
 const { runFaceApiDetection } = require('../services/faceApiDetection');
 const { findBestPersonMatch } = require('../services/recognitionService');
 const { runFaceApiTest } = require('../services/faceApiTestService');
+const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const logUpload = (message, payload) => {
   if (payload === undefined) {
@@ -76,6 +77,14 @@ const validateFiles = (files) => {
 
 const uploadPhotos = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     logUpload('handler started');
 
     if (!req.files || req.files.length === 0) {
@@ -114,6 +123,9 @@ const uploadPhotos = async (req, res, next) => {
     }
 
     const savedPhotos = [];
+    const createdPhotoIds = [];
+    const createdFaceIds = [];
+    const touchedPersonIds = new Set();
     let personsDetected = 0;
     let facesConfirmed = 0;
     let uncertain = 0;
@@ -168,11 +180,13 @@ const uploadPhotos = async (req, res, next) => {
       }
 
       const photo = await Photo.create({
+        ownerId: userId,
         imageUrl,
         folder,
         faceCount: detection.validFaces,
         detectionResult: detection
       });
+      createdPhotoIds.push(String(photo._id));
       const persistedFaces = [];
       const detectedFaces = Array.isArray(detection.faces) ? detection.faces : [];
       const orderedFaces = sortFacesByOrder(detectedFaces, faceOrder);
@@ -188,7 +202,7 @@ const uploadPhotos = async (req, res, next) => {
         let similarityDifference = 0;
         if (face.accepted) {
           try {
-            match = await findBestPersonMatch(safeEmbedding);
+            match = await findBestPersonMatch(safeEmbedding, { userId });
             similarity = Number(match?.similarity || 0);
             secondBestSimilarity = Number(match?.secondBestSimilarity || 0);
             similarityDifference = similarity - secondBestSimilarity;
@@ -318,6 +332,7 @@ const uploadPhotos = async (req, res, next) => {
 
         try {
           const faceDoc = await Face.create({
+            ownerId: userId,
             photoId: photo._id,
             box: {
               x: Number(face?.box?.x || 0),
@@ -330,6 +345,10 @@ const uploadPhotos = async (req, res, next) => {
             learningConfirmed: false,
             orderIndex: faceIndex
           });
+          createdFaceIds.push(String(faceDoc._id));
+          if (matchedPerson?._id) {
+            touchedPersonIds.add(String(matchedPerson._id));
+          }
 
           persistedFaces.push({
             faceId: String(faceDoc._id),
@@ -361,6 +380,13 @@ const uploadPhotos = async (req, res, next) => {
         faces: persistedFaces
       });
     }
+
+    await linkEntitiesToUser({
+      userId,
+      photoIds: createdPhotoIds,
+      faceIds: createdFaceIds,
+      personIds: Array.from(touchedPersonIds)
+    });
 
     logUpload('upload completed', { savedPhotos: savedPhotos.length });
     const uncertainOnlyMessage =

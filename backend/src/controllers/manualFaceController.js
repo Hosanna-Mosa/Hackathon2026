@@ -3,10 +3,10 @@ const Photo = require('../models/Photo');
 const Person = require('../models/Person');
 const { extractManualFaceEmbedding } = require('../services/manualFaceService');
 const { uploadPersonDpFromImageUrl } = require('../services/personDpService');
+const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const DUPLICATE_SIMILARITY_THRESHOLD = Number(process.env.EMBEDDING_DUPLICATE_SIMILARITY_THRESHOLD || 0.9995);
 
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 const toVector = (value) => (Array.isArray(value) ? value.map((v) => Number(v) || 0) : []);
 
@@ -90,22 +90,30 @@ const computeAverageEmbedding = (embeddings) => {
   return sums.map((value) => Number((value / count).toFixed(8)));
 };
 
-const appendEmbeddingToPerson = async (name, embedding) => {
+const appendEmbeddingToPerson = async (userId, name, embedding) => {
+  const safeUserId = String(userId || '').trim();
+  if (!safeUserId) {
+    const error = new Error('Unauthorized request.');
+    error.statusCode = 401;
+    throw error;
+  }
+
   const normalizedName = normalizePersonName(name);
-  const safeName = escapeRegex(normalizedName);
-  if (!safeName) {
+  if (!normalizedName) {
     const error = new Error('Name is required.');
     error.statusCode = 400;
     throw error;
   }
 
   const personQuery = {
-    name: { $regex: `^${safeName}$`, $options: 'i' }
+    ownerId: safeUserId,
+    name: normalizedName
   };
 
   let person = await Person.findOne(personQuery);
   if (!person) {
     person = await Person.create({
+      ownerId: safeUserId,
       name: normalizedName,
       embeddings: [embedding],
       averageEmbedding: embedding
@@ -132,6 +140,14 @@ const appendEmbeddingToPerson = async (name, embedding) => {
 
 const manualFaceLabel = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const photoId = String(req.body?.photoId || '').trim();
     const name = normalizePersonName(req.body?.name);
     const box = req.body?.box;
@@ -143,7 +159,7 @@ const manualFaceLabel = async (req, res, next) => {
       });
     }
 
-    const photo = await Photo.findById(photoId);
+    const photo = await Photo.findOne({ _id: photoId, ownerId: userId });
     if (!photo) {
       return res.status(404).json({
         success: false,
@@ -159,7 +175,7 @@ const manualFaceLabel = async (req, res, next) => {
       });
     }
 
-    const person = await appendEmbeddingToPerson(name, embedding);
+    const person = await appendEmbeddingToPerson(userId, name, embedding);
     try {
       const dpUrl = await uploadPersonDpFromImageUrl({
         imageUrl: photo.imageUrl,
@@ -176,6 +192,7 @@ const manualFaceLabel = async (req, res, next) => {
     }
 
     const face = await Face.create({
+      ownerId: userId,
       photoId: photo._id,
       box: {
         x: clampedBox.x,
@@ -189,8 +206,14 @@ const manualFaceLabel = async (req, res, next) => {
       orderIndex: 0
     });
 
-    await Photo.findByIdAndUpdate(photo._id, {
+    await Photo.findOneAndUpdate({ _id: photo._id, ownerId: userId }, {
       $inc: { faceCount: 1 }
+    });
+
+    await linkEntitiesToUser({
+      userId,
+      faceIds: [String(face._id)],
+      personIds: [String(person._id)]
     });
 
     return res.status(201).json({

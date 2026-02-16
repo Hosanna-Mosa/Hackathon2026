@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
-import { Camera, LayoutDashboard, Image, Users, Bot, Upload, Send, Settings } from "lucide-react";
-import { Progress } from "@/components/ui/progress";
+import { Camera, LayoutDashboard, Image, Users, Bot, Upload, Send, LogOut } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
@@ -13,6 +13,7 @@ const navItems = [
 
 const AppSidebar = () => {
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   return (
     <aside className="fixed left-0 top-0 z-30 flex h-screen w-60 flex-col border-r border-border bg-card">
@@ -43,16 +44,18 @@ const AppSidebar = () => {
         })}
       </nav>
 
-      {/* <div className="mx-3 mb-3 rounded-lg border border-border bg-background p-4">
-        <p className="text-xs font-semibold text-primary">STORAGE PLAN</p>
-        <Progress value={72} className="my-2 h-1.5" />
-        <p className="text-xs text-muted-foreground">72.4 GB of 100 GB used</p>
-        <button className="mt-3 w-full rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90">
-          Upgrade Pro
+      <div className="mx-3 mb-3 rounded-lg border border-border bg-background p-3">
+        <p className="truncate text-sm font-semibold text-foreground">{user?.name || "User"}</p>
+        <p className="truncate text-xs text-muted-foreground">{user?.email || ""}</p>
+        <button
+          type="button"
+          onClick={logout}
+          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Logout
         </button>
-      </div> */}
-
-
+      </div>
     </aside>
   );
 };

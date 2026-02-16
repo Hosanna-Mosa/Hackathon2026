@@ -42,18 +42,32 @@ const cosineSimilarity = (left, right) => {
 
 const findBestPersonMatch = async (
   embedding,
-  threshold = DEFAULT_SIMILARITY_THRESHOLD,
-  minMargin = DEFAULT_SIMILARITY_MARGIN,
-  singlePersonThreshold = DEFAULT_SINGLE_PERSON_THRESHOLD
+  {
+    userId,
+    threshold = DEFAULT_SIMILARITY_THRESHOLD,
+    minMargin = DEFAULT_SIMILARITY_MARGIN,
+    singlePersonThreshold = DEFAULT_SINGLE_PERSON_THRESHOLD
+  } = {}
 ) => {
   if (!Array.isArray(embedding) || embedding.length === 0) {
     return { person: null, similarity: 0, secondBestSimilarity: 0, matched: false };
   }
 
+  if (!String(userId || '').trim()) {
+    return {
+      person: null,
+      similarity: 0,
+      secondBestSimilarity: 0,
+      matched: false,
+      peopleCompared: 0,
+      strategy: 'missing_user_scope'
+    };
+  }
+
   let people = [];
   try {
     people = await Person.find(
-      { embeddings: { $exists: true, $not: { $size: 0 } } },
+      { ownerId: userId, embeddings: { $exists: true, $not: { $size: 0 } } },
       { name: 1, embeddings: 1, averageEmbedding: 1 }
     ).lean();
   } catch (error) {

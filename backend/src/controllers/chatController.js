@@ -1,13 +1,45 @@
 const Photo = require('../models/Photo');
 const Delivery = require('../models/Delivery');
+const Face = require('../models/Face');
+const Person = require('../models/Person');
 const { getGroqAgentDecision } = require('../services/groqService');
+const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
-const handleGetPhotosIntent = async (decision) => {
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const handleGetPhotosIntent = async (decision, userId) => {
   const personFilter = decision?.person || null;
+  const query = { ownerId: userId };
 
-  const query = personFilter
-    ? { detectedPersons: { $in: [String(personFilter).toLowerCase()] } }
-    : {};
+  if (personFilter) {
+    const personName = String(personFilter || '').trim();
+    const safeName = escapeRegex(personName);
+    const personDoc = await Person.findOne({
+      ownerId: userId,
+      name: { $regex: `^${safeName}$`, $options: 'i' }
+    }).lean();
+
+    if (!personDoc) {
+      return {
+        action: 'get_photos',
+        message: 'Found 0 photos.',
+        data: { photos: [] }
+      };
+    }
+
+    const photoIds = await Face.distinct('photoId', {
+      ownerId: userId,
+      personId: personDoc._id
+    });
+    if (!Array.isArray(photoIds) || photoIds.length === 0) {
+      return {
+        action: 'get_photos',
+        message: 'Found 0 photos.',
+        data: { photos: [] }
+      };
+    }
+    query._id = { $in: photoIds };
+  }
 
   const photos = await Photo.find(query).sort({ createdAt: -1 }).limit(30);
 
@@ -18,15 +50,21 @@ const handleGetPhotosIntent = async (decision) => {
   };
 };
 
-const handleDeliveryIntent = async (decision) => {
+const handleDeliveryIntent = async (decision, userId) => {
   const person = decision?.person || 'unknown_person';
   const type = decision?.channel === 'whatsapp' ? 'whatsapp' : 'email';
 
   const delivery = await Delivery.create({
+    ownerId: userId,
     person,
     type,
     status: 'sent',
     timestamp: new Date()
+  });
+
+  await linkEntitiesToUser({
+    userId,
+    deliveryIds: [String(delivery._id)]
   });
 
   return {
@@ -38,6 +76,14 @@ const handleDeliveryIntent = async (decision) => {
 
 const chatWithAgent = async (req, res, next) => {
   try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const { message } = req.body;
 
     if (!message) {
@@ -50,9 +96,9 @@ const chatWithAgent = async (req, res, next) => {
     let payload;
 
     if (action === 'get_photos') {
-      payload = await handleGetPhotosIntent(decision);
+      payload = await handleGetPhotosIntent(decision, userId);
     } else if (action === 'log_delivery') {
-      payload = await handleDeliveryIntent(decision);
+      payload = await handleDeliveryIntent(decision, userId);
     } else {
       payload = {
         action: 'chat_reply',

@@ -1,7 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-require('./tfjsCompat');
-require('@tensorflow/tfjs-node');
+require('./tensorflowRuntime');
 const faceapi = require('face-api.js');
 const canvas = require('canvas');
 
