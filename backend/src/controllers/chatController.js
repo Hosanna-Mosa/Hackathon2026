@@ -6,6 +6,7 @@ const Face = require('../models/Face');
 const Person = require('../models/Person');
 const ChatHistory = require('../models/ChatHistory');
 const { linkEntitiesToUser } = require('../services/userEntityLinkService');
+const { sendDeliveryEmail } = require('../services/emailDeliveryService');
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const normalizeHistoryLimit = (value) => {
@@ -40,10 +41,8 @@ const storeChatHistory = async ({
   } catch (historyError) {
     console.error('Chat History Persist Error:', historyError);
   }
-const { sendDeliveryEmail } = require('../services/emailDeliveryService');
-const { linkEntitiesToUser } = require('../services/userEntityLinkService');
+};
 
-const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const DEFAULT_EMAIL_PHOTO_LIMIT = Number(process.env.DEFAULT_EMAIL_PHOTO_LIMIT || 12);
 const MAX_EMAIL_PHOTO_LIMIT = 30;
@@ -507,7 +506,6 @@ const chatWithAgent = async (req, res, next) => {
 };
 
 const getChatHistory = async (req, res, next) => {
-const sendPhotosEmailFromDialog = async (req, res, next) => {
   try {
     const userId = String(req.userId || '').trim();
     if (!userId) {
@@ -527,6 +525,22 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
       success: true,
       count: history.length,
       history
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const sendPhotosEmailFromDialog = async (req, res, next) => {
+  try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
     const personId = String(req.body?.personId || '').trim();
     const person = String(req.body?.person || '').trim();
     const recipientEmail = normalizeEmail(req.body?.recipientEmail);
@@ -567,6 +581,6 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
 
 module.exports = {
   chatWithAgent,
-  getChatHistory
+  getChatHistory,
   sendPhotosEmailFromDialog
 };

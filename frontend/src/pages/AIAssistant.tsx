@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Send, Sparkles, Bot } from "lucide-react";
-import { chatWithAgentApi, sendChatPhotosEmailApi, type Photo } from "@/lib/api";
+import { chatWithAgentApi, sendChatPhotosEmailApi, getChatHistoryApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/context/AuthContext";
@@ -61,7 +61,7 @@ const parseStoredMessages = (value: string): ChatMessage[] => {
           text,
           action: typeof cast.action === "string" ? cast.action : undefined,
           photos: Array.isArray(cast.photos) ? cast.photos : [],
-        } satisfies ChatMessage;
+        } as ChatMessage;
       })
       .filter((item): item is ChatMessage => Boolean(item));
 
@@ -76,20 +76,23 @@ const AIAssistant = () => {
   const { user } = useAuth();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
-  const initialAssistantMessage: ChatMessage = {
-    id: "init",
-    role: "assistant",
-    text: "AI Assistant is online. Ask me to fetch photos or log a delivery action.",
-  };
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    initialAssistantMessage,
-  ]);
+
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [pendingEmailRequest, setPendingEmailRequest] = useState<PendingEmailRequest | null>(null);
   const [emailInput, setEmailInput] = useState("");
   const [emailError, setEmailError] = useState("");
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isSending]);
 
   const chatStorageKey = useMemo(
     () => (user?.id ? `${CHAT_STORAGE_PREFIX}:${user.id}` : ""),
@@ -149,10 +152,10 @@ const AIAssistant = () => {
             ];
           });
 
-        setMessages(rebuilt.length > 0 ? rebuilt : [initialAssistantMessage]);
+        setMessages(rebuilt.length > 0 ? rebuilt : INITIAL_MESSAGES);
       } catch (_error) {
         if (active) {
-          setMessages([initialAssistantMessage]);
+          setMessages(INITIAL_MESSAGES);
         }
       }
     };
@@ -334,7 +337,7 @@ const AIAssistant = () => {
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5">
           {messages.map((msg) => (
-            <div key={msg.id}>
+            <div key={msg.id} className="animate-fade-in">
               {msg.role === "assistant" ? (
                 <div className="flex gap-3">
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
@@ -345,11 +348,11 @@ const AIAssistant = () => {
                     {msg.photos && msg.photos.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {msg.photos.slice(0, 8).map((photo) => (
-                          <div key={photo._id} className="relative h-24 w-24 overflow-hidden rounded-lg border border-border">
+                          <div key={photo._id} className="relative h-24 w-24 animate-scale-up overflow-hidden rounded-lg border border-border">
                             <img
                               src={resolvePhotoUrl(photo.imageUrl || photo.path, photo.filename)}
                               alt={photo.filename || "Assistant result photo"}
-                              className="h-full w-full object-cover transition-transform hover:scale-110"
+                              className="h-full w-full object-cover transition-transform duration-300 ease-in-out hover:scale-110"
                             />
                           </div>
                         ))}
@@ -372,8 +375,10 @@ const AIAssistant = () => {
             </div>
           ))}
 
+
+
           {isSending && (
-            <div className="flex gap-3">
+            <div className="animate-fade-in flex gap-3">
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary">
                 <Bot className="h-4 w-4 text-primary-foreground" />
               </div>
@@ -382,6 +387,7 @@ const AIAssistant = () => {
               </div>
             </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="flex flex-wrap gap-2 px-5 pb-3">
@@ -425,7 +431,7 @@ const AIAssistant = () => {
         </div>
       </div>
 
-      <div className="hidden w-72 space-y-6 xl:block">
+      <div className="hidden w-72 space-y-6 animate-slide-in-right xl:block">
         <div className="rounded-xl border border-border bg-card p-4">
           <h3 className="text-xs font-bold uppercase text-muted-foreground">Agent Capability</h3>
           <div className="mt-3 space-y-2 text-sm text-foreground">
@@ -435,7 +441,7 @@ const AIAssistant = () => {
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

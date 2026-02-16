@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { AlertCircle, CheckCircle2, Sparkles, Upload, UserRoundPlus, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
@@ -59,6 +59,7 @@ const UploadCenter = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isLabelSaving, setIsLabelSaving] = useState(false);
+  const resultsRef = useRef<HTMLDivElement>(null);
   const [confirmingPhotoId, setConfirmingPhotoId] = useState<string | null>(null);
   const [faceOrder, setFaceOrder] = useState<"left_to_right" | "right_to_left">("left_to_right");
   const [manualModeByPhoto, setManualModeByPhoto] = useState<Record<string, boolean>>({});
@@ -66,6 +67,7 @@ const UploadCenter = () => {
   const [selectedCandidateByFace, setSelectedCandidateByFace] = useState<Record<string, string>>({});
   const [customLabelByFace, setCustomLabelByFace] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
+  const [scanningPhotoIds, setScanningPhotoIds] = useState<Set<string>>(new Set());
 
   const onSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -82,6 +84,44 @@ const UploadCenter = () => {
       );
     }
   };
+
+  // Effect to trigger scanning animation for new photos and scroll to them
+  useEffect(() => {
+    if (uploadedPhotos.length > 0) {
+      // Scroll to results
+      if (resultsRef.current) {
+        // slight delay to allow rendering
+        setTimeout(() => {
+          resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 500);
+      }
+
+      const newIds = uploadedPhotos
+        .filter(p => !p.faces.every(f => f.learningConfirmed)) // heuristic: treat as "new" if not fully confirmed? Or just track seen IDs.
+        .map(p => p.photoId);
+    }
+  }, [uploadedPhotos.length]);
+
+  // Implementation strategy change:
+  // Modify `onUpload` to add IDs to `scanningPhotoIds`.
+  // Add a `useEffect` that watches `scanningPhotoIds` and sets timeouts to remove them.
+
+  useEffect(() => {
+    if (scanningPhotoIds.size > 0) {
+      const timers: NodeJS.Timeout[] = [];
+      scanningPhotoIds.forEach(id => {
+        const timer = setTimeout(() => {
+          setScanningPhotoIds(prev => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        }, 7000); // 7 seconds = approx 3.5 scanner loops (2s duration)
+        timers.push(timer);
+      });
+      return () => timers.forEach(t => clearTimeout(t));
+    }
+  }, [scanningPhotoIds]);
 
   const onUpload = async () => {
     if (import.meta.env.DEV) {
@@ -101,24 +141,18 @@ const UploadCenter = () => {
     setSelectedCandidateByFace({});
     setCustomLabelByFace({});
 
-    // Clear previous results only if we are starting a fresh batch that replaces everything? 
-    // Or should we append? The UI seems to imply a session. 
-    // Let's clear for now to match previous behavior, or we could append.
-    // Previous behavior: setUploadedPhotos(data.photos) -> replaced.
-    // Let's replace the list to start fresh, but then append as we go.
     setUploadedPhotos([]);
 
+    // We will add to scanning set as they arrive
     const totalFiles = selectedFiles.length;
     let successCount = 0;
     let failCount = 0;
-    const newPhotos: UploadedPhoto[] = [];
 
     try {
       // Process files one by one to show progress
       for (let i = 0; i < totalFiles; i++) {
         const file = selectedFiles[i];
 
-        // Simulate progress for the current file since we don't have real-time byte progress
         let fileSimulatedProgress = 0;
         const progressInterval = setInterval(() => {
           fileSimulatedProgress = Math.min(fileSimulatedProgress + (Math.random() * 10 + 5), 90);
@@ -127,29 +161,31 @@ const UploadCenter = () => {
         }, 500);
 
         try {
-          // Upload single file
           const data = await uploadPhotosApi([file], faceOrder);
 
           if (data.photos && data.photos.length > 0) {
-            newPhotos.push(...data.photos);
+            // Trigger Scan Animation for new photos
+            const newIds = data.photos.map(p => p.photoId);
+            setScanningPhotoIds(prev => {
+              const next = new Set(prev);
+              newIds.forEach(id => next.add(id));
+              return next;
+            });
+
             setUploadedPhotos((prev) => [...prev, ...data.photos]);
           }
           successCount++;
         } catch (err) {
           console.error(`Failed to upload file ${file.name}:`, err);
           failCount++;
-          // Optional: show a toast or partial error?
         } finally {
           clearInterval(progressInterval);
-          // Update progress to reflect this file is 100% done
           setUploadProgress(Math.round(((i + 1) / totalFiles) * 100));
         }
       }
 
       if (failCount > 0) {
         setError(`Completed with issues: ${successCount} uploaded, ${failCount} failed.`);
-      } else {
-        // All good
       }
 
       setSelectedFiles([]);
@@ -392,7 +428,7 @@ const UploadCenter = () => {
         </div>
       </section>
 
-      <section>
+      <section ref={resultsRef} className="min-h-screen scroll-mt-4 pb-24">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-foreground">Upload Preview</h2>
           <Badge variant="secondary" className="text-xs">
@@ -405,17 +441,17 @@ const UploadCenter = () => {
             Uploaded photos will appear here with face boxes and labeling actions.
           </div>
         ) : (
-          <div className="space-y-5">
+          <div className="space-y-8">
             {uploadedPhotos.map((photo, photoIndex) => {
               const isManualMode = Boolean(manualModeByPhoto[photo.photoId]);
               const unresolvedCount = photo.faces.filter((face) => !face.personId).length;
               const pendingConfirmCount = photo.faces.filter((face) => face.personId && !face.learningConfirmed).length;
               const isConfirmingThisPhoto = confirmingPhotoId === photo.photoId;
               return (
-                <article key={photo.photoId} className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-5">
-                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
+                <article key={photo.photoId} className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:p-6 transition-all duration-500 ease-in-out hover:shadow-md">
+                  <div className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
                     <div>
-                      <h3 className="text-base font-semibold text-foreground">Photo {photoIndex + 1}</h3>
+                      <h3 className="text-lg font-semibold text-foreground">Photo {photoIndex + 1}</h3>
                       <p className="text-xs text-muted-foreground">
                         {photo.faces.length} detected face{photo.faces.length === 1 ? "" : "s"}
                       </p>
@@ -447,182 +483,206 @@ const UploadCenter = () => {
                       onSaved={(face) => onManualFaceSaved(photo.photoId, face)}
                     />
                   ) : (
-                    <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-                      <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground">
-                          Click a face box on the image to quickly confirm or update the name.
+                    <div className="grid gap-6 lg:grid-cols-2">
+                      <div className="space-y-3">
+                        <div className="relative mx-auto w-full max-w-lg overflow-hidden rounded-xl border border-border bg-muted/30 shadow-sm">
+                          <FaceOverlayLabeler
+                            imageSrc={resolvePhotoUrl(photo.imageUrl)}
+                            faces={photo.faces}
+                            isBusy={isLabelSaving}
+                            onSaveLabel={onLabelFace}
+                            activeFaceId={focusedFaceIdByPhoto[photo.photoId] || null}
+                            onActiveFaceChange={(faceId) =>
+                              setFocusedFaceIdByPhoto((prev) => ({
+                                ...prev,
+                                [photo.photoId]: faceId,
+                              }))
+                            }
+                          />
+                          {/* Scanner Effect */}
+                          {scanningPhotoIds.has(photo.photoId) && (
+                            <>
+                              <div className="pointer-events-none absolute inset-x-0 -top-1 h-1 bg-primary/80 shadow-[0_0_20px_2px_theme(colors.primary.DEFAULT)] animate-scan z-20 opacity-60"></div>
+                              <div className="pointer-events-none absolute inset-0 bg-primary/5 z-10 animate-pulse-soft"></div>
+                            </>
+                          )}
+                        </div>
+                        <p className="flex justify-center items-center gap-2 text-xs text-muted-foreground">
+                          <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse" />
+                          <span>
+                            {scanningPhotoIds.has(photo.photoId)
+                              ? "Scanning for faces..."
+                              : "AI Analysis complete. Click a box to edit."}
+                          </span>
                         </p>
-                        <FaceOverlayLabeler
-                          imageSrc={resolvePhotoUrl(photo.imageUrl)}
-                          faces={photo.faces}
-                          isBusy={isLabelSaving}
-                          onSaveLabel={onLabelFace}
-                          activeFaceId={focusedFaceIdByPhoto[photo.photoId] || null}
-                          onActiveFaceChange={(faceId) =>
-                            setFocusedFaceIdByPhoto((prev) => ({
-                              ...prev,
-                              [photo.photoId]: faceId,
-                            }))
-                          }
-                        />
                       </div>
 
-                      <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+                      <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-4">
                         <p className="text-sm font-semibold text-foreground">Detected People</p>
 
-                        {photo.faces.map((face, index) => {
-                          const status = getFaceStatus(face);
-                          const personLabel = `Person ${(face.orderIndex ?? index) + 1}`;
-                          const candidates =
-                            Array.isArray(face.candidateNames) && face.candidateNames.length > 0
-                              ? face.candidateNames
-                              : face.name && face.name !== "unknown"
-                                ? [{ name: face.name, similarity: Number(face.similarity || 0) }]
-                                : [];
-                          const selectedName = selectedCandidateByFace[face.faceId] || candidates[0]?.name || "";
-                          const customLabel = customLabelByFace[face.faceId] || "";
-                          const isFocused = (focusedFaceIdByPhoto[photo.photoId] || null) === face.faceId;
+                        {scanningPhotoIds.has(photo.photoId) ? (
+                          <div className="space-y-3 py-4">
+                            <div className="h-12 w-full animate-pulse rounded-lg bg-muted/50"></div>
+                            <div className="h-12 w-full animate-pulse rounded-lg bg-muted/50"></div>
+                            <p className="text-center text-xs text-muted-foreground animate-pulse">Identifying...</p>
+                          </div>
+                        ) : (
+                          photo.faces.map((face, index) => {
+                            const status = getFaceStatus(face);
+                            const personLabel = `Person ${(face.orderIndex ?? index) + 1}`;
+                            const candidates =
+                              Array.isArray(face.candidateNames) && face.candidateNames.length > 0
+                                ? face.candidateNames
+                                : face.name && face.name !== "unknown"
+                                  ? [{ name: face.name, similarity: Number(face.similarity || 0) }]
+                                  : [];
+                            const selectedName = selectedCandidateByFace[face.faceId] || candidates[0]?.name || "";
+                            const customLabel = customLabelByFace[face.faceId] || "";
+                            const isFocused = (focusedFaceIdByPhoto[photo.photoId] || null) === face.faceId;
 
-                          return (
-                            <div
-                              key={face.faceId}
-                              className={`rounded-lg border bg-card p-3 transition-all ${isFocused
-                                ? "border-primary shadow-[0_0_0_2px_rgba(59,130,246,0.18)]"
-                                : "border-border"
-                                }`}
-                              onClick={() =>
-                                setFocusedFaceIdByPhoto((prev) => ({
-                                  ...prev,
-                                  [photo.photoId]: face.faceId,
-                                }))
-                              }
-                            >
-                              <div className="mb-2 flex items-center justify-between gap-2">
-                                <p className="text-sm font-medium text-foreground">{personLabel}</p>
-                                {status === "matched" ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                                    <CheckCircle2 className="h-3 w-3" /> Matched
-                                  </span>
-                                ) : status === "ambiguous" ? (
-                                  <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
-                                    Needs confirmation
-                                  </span>
-                                ) : (
-                                  <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                                    Unknown
-                                  </span>
-                                )}
-                              </div>
-
-                              {status === "matched" ? (
-                                <p className="text-xs text-muted-foreground">
-                                  {face.learningConfirmed ? (
-                                    <>
-                                      Saved as{" "}
-                                      <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
-                                        {face.name}
-                                      </span>
-                                    </>
+                            return (
+                              <div
+                                key={face.faceId}
+                                className={`rounded-lg border bg-card p-3 transition-all ${isFocused
+                                  ? "border-primary shadow-[0_0_0_2px_rgba(59,130,246,0.18)]"
+                                  : "border-border"
+                                  }`}
+                                onClick={() =>
+                                  setFocusedFaceIdByPhoto((prev) => ({
+                                    ...prev,
+                                    [photo.photoId]: face.faceId,
+                                  }))
+                                }
+                              >
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <p className="text-sm font-medium text-foreground">{personLabel}</p>
+                                  {status === "matched" ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                                      <CheckCircle2 className="h-3 w-3" /> Matched
+                                    </span>
+                                  ) : status === "ambiguous" ? (
+                                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                                      Needs confirmation
+                                    </span>
                                   ) : (
-                                    <>
-                                      Matched as{" "}
-                                      <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
-                                        {face.name}
-                                      </span>
-                                      . Confirm from box if needed.
-                                    </>
+                                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                                      Unknown
+                                    </span>
                                   )}
-                                </p>
-                              ) : status === "ambiguous" ? (
-                                <div className="space-y-2">
-                                  <p className="text-xs text-muted-foreground">Choose existing candidate or save a new label.</p>
-                                  {candidates.slice(0, 3).length > 0 && (
+                                </div>
+
+                                {status === "matched" ? (
+                                  <p className="text-xs text-muted-foreground">
+                                    {face.learningConfirmed ? (
+                                      <>
+                                        Saved as{" "}
+                                        <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
+                                          {face.name}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        Matched as{" "}
+                                        <span className={isFocused ? "rounded bg-primary/15 px-1 text-foreground" : "text-foreground"}>
+                                          {face.name}
+                                        </span>
+                                        . Confirm from box if needed.
+                                      </>
+                                    )}
+                                  </p>
+                                ) : status === "ambiguous" ? (
+                                  <div className="space-y-2">
+                                    <p className="text-xs text-muted-foreground">Choose existing candidate or save a new label.</p>
+                                    {candidates.slice(0, 3).length > 0 && (
+                                      <div className="flex flex-col gap-2 sm:flex-row">
+                                        <select
+                                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
+                                          value={selectedName}
+                                          onChange={(e) =>
+                                            setSelectedCandidateByFace((prev) => ({
+                                              ...prev,
+                                              [face.faceId]: e.target.value,
+                                            }))
+                                          }
+                                          disabled={isLabelSaving}
+                                        >
+                                          {candidates.slice(0, 3).map((candidate) => (
+                                            <option key={`${face.faceId}-${candidate.name}`} value={candidate.name}>
+                                              {candidate.name} ({Number(candidate.similarity || 0).toFixed(3)})
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                                          disabled={isLabelSaving || !selectedName}
+                                          onClick={() => {
+                                            void onLabelFace(face.faceId, selectedName);
+                                          }}
+                                        >
+                                          {isLabelSaving ? "Saving..." : "Confirm"}
+                                        </button>
+                                      </div>
+                                    )}
+
                                     <div className="flex flex-col gap-2 sm:flex-row">
-                                      <select
+                                      <input
+                                        type="text"
                                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
-                                        value={selectedName}
+                                        placeholder="Enter new label"
+                                        value={customLabel}
                                         onChange={(e) =>
-                                          setSelectedCandidateByFace((prev) => ({
+                                          setCustomLabelByFace((prev) => ({
                                             ...prev,
                                             [face.faceId]: e.target.value,
                                           }))
                                         }
                                         disabled={isLabelSaving}
-                                      >
-                                        {candidates.slice(0, 3).map((candidate) => (
-                                          <option key={`${face.faceId}-${candidate.name}`} value={candidate.name}>
-                                            {candidate.name} ({Number(candidate.similarity || 0).toFixed(3)})
-                                          </option>
-                                        ))}
-                                      </select>
+                                      />
                                       <button
                                         type="button"
                                         className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                                        disabled={isLabelSaving || !selectedName}
+                                        disabled={isLabelSaving || !customLabel.trim()}
                                         onClick={() => {
-                                          void onLabelFace(face.faceId, selectedName);
+                                          void onLabelFace(face.faceId, customLabel.trim());
                                         }}
                                       >
-                                        {isLabelSaving ? "Saving..." : "Confirm"}
+                                        {isLabelSaving ? "Saving..." : "Save Label"}
                                       </button>
                                     </div>
-                                  )}
-
-                                  <div className="flex flex-col gap-2 sm:flex-row">
-                                    <input
-                                      type="text"
-                                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground"
-                                      placeholder="Enter new label"
-                                      value={customLabel}
-                                      onChange={(e) =>
-                                        setCustomLabelByFace((prev) => ({
-                                          ...prev,
-                                          [face.faceId]: e.target.value,
-                                        }))
-                                      }
-                                      disabled={isLabelSaving}
-                                    />
-                                    <button
-                                      type="button"
-                                      className="rounded-md border border-border bg-background px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                                      disabled={isLabelSaving || !customLabel.trim()}
-                                      onClick={() => {
-                                        void onLabelFace(face.faceId, customLabel.trim());
-                                      }}
-                                    >
-                                      {isLabelSaving ? "Saving..." : "Save Label"}
-                                    </button>
                                   </div>
-                                </div>
-                              ) : (
-                                <p className="text-xs text-muted-foreground">No confident match yet. Use the face box to assign a name.</p>
-                              )}
-                            </div>
-                          );
-                        })}
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">No confident match yet. Use the face box to assign a name.</p>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
 
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-                    <p className="text-xs text-muted-foreground">
-                      {unresolvedCount > 0
-                        ? `${unresolvedCount} face${unresolvedCount === 1 ? "" : "s"} still need a label before confirmation.`
-                        : pendingConfirmCount > 0
-                          ? `${pendingConfirmCount} matched face${pendingConfirmCount === 1 ? "" : "s"} ready to be learned.`
-                          : "All labels for this photo are already confirmed and learned."}
-                    </p>
-                    <button
-                      type="button"
-                      className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={isConfirmingThisPhoto || unresolvedCount > 0 || pendingConfirmCount === 0}
-                      onClick={() => {
-                        void onConfirmAllLabels(photo.photoId);
-                      }}
-                    >
-                      {isConfirmingThisPhoto ? "Confirming..." : "Confirm All Labels"}
-                    </button>
-                  </div>
+                  {!scanningPhotoIds.has(photo.photoId) && (
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 animate-fade-in">
+                      <p className="text-xs text-muted-foreground">
+                        {unresolvedCount > 0
+                          ? `${unresolvedCount} face${unresolvedCount === 1 ? "" : "s"} still need a label before confirmation.`
+                          : pendingConfirmCount > 0
+                            ? `${pendingConfirmCount} matched face${pendingConfirmCount === 1 ? "" : "s"} ready to be learned.`
+                            : "All labels for this photo are already confirmed and learned."}
+                      </p>
+                      <button
+                        type="button"
+                        className="rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                        disabled={isConfirmingThisPhoto || unresolvedCount > 0 || pendingConfirmCount === 0}
+                        onClick={() => {
+                          void onConfirmAllLabels(photo.photoId);
+                        }}
+                      >
+                        {isConfirmingThisPhoto ? "Confirming..." : "Confirm All Labels"}
+                      </button>
+                    </div>
+                  )}
                 </article>
               );
             })}

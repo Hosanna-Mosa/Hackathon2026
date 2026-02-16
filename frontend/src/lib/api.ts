@@ -400,6 +400,8 @@ export const getChatHistoryApi = async (limit = 50) => {
     count: number;
     history: ChatHistoryEntry[];
   }>(`/api/chat/history?limit=${safeLimit}`);
+};
+
 export const sendChatPhotosEmailApi = async (payload: {
   personId?: string;
   person?: string;

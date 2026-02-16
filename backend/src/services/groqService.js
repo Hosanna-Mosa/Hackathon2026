@@ -40,10 +40,7 @@ const parseIntentFallback = (message) => {
     platform: null
   };
 
-  if (normalized.includes('show') || normalized.includes('find') || normalized.includes('get')) {
-    return { ...emptySchema, intent: 'search_photos', person: extractPersonFromMessage(message) };
-  }
-
+  // 1. Check for SEND/SHARE intent first (highest priority for actions)
   if (normalized.includes('deliver') || normalized.includes('send') || normalized.includes('share')) {
     const isWhatsapp = normalized.includes('whatsapp');
     const isEmail = normalized.includes('mail') || normalized.includes('email');
@@ -55,8 +52,14 @@ const parseIntentFallback = (message) => {
     };
   }
 
+  // 2. Check for COUNT intent
   if (normalized.includes('count') || normalized.includes('how many')) {
     return { ...emptySchema, intent: 'count_photos', person: extractPersonFromMessage(message) };
+  }
+
+  // 3. Check for SEARCH intent (show, find, get, or just "photos of...")
+  if (normalized.includes('show') || normalized.includes('find') || normalized.includes('get') || normalized.includes('photos') || normalized.includes('pictures')) {
+    return { ...emptySchema, intent: 'search_photos', person: extractPersonFromMessage(message) };
   }
 
   return emptySchema;

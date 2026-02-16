@@ -150,6 +150,9 @@ const createPerson = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Please enter a real person name. "unknown" labels are not allowed.'
+      });
+    }
+
     if (email && !EMAIL_REGEX.test(email)) {
       return res.status(400).json({
         success: false,

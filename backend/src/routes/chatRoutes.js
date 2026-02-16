@@ -1,7 +1,6 @@
 const express = require('express');
 
-const { chatWithAgent, getChatHistory } = require('../controllers/chatController');
-const { chatWithAgent, sendPhotosEmailFromDialog } = require('../controllers/chatController');
+const { chatWithAgent, getChatHistory, sendPhotosEmailFromDialog } = require('../controllers/chatController');
 
 const router = express.Router();
 
