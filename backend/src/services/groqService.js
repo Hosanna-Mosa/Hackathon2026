@@ -2,6 +2,31 @@ const axios = require('axios');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
+const extractPersonFromMessage = (message) => {
+  const text = String(message || '').trim();
+  if (!text) {
+    return null;
+  }
+
+  const patterns = [
+    /\bsend\s+([a-z][a-z\s'.-]{1,80}?)\s+(?:photos|pictures|pics)\b/i,
+    /\b(?:photos|pictures|pics)\s+of\s+([a-z][a-z\s'.-]{1,80}?)(?=\s+(?:to|on|via|using|from)\b|[?.!,]|$)/i,
+    /\bof\s+([a-z][a-z\s'.-]{1,80}?)(?=\s+(?:to|on|via|using|from)\b|[?.!,]|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) {
+      const candidate = String(match[1]).trim();
+      if (candidate) {
+        return candidate;
+      }
+    }
+  }
+
+  return null;
+};
+
 const parseIntentFallback = (message) => {
   const normalized = String(message || '').toLowerCase();
 
@@ -16,19 +41,22 @@ const parseIntentFallback = (message) => {
   };
 
   if (normalized.includes('show') || normalized.includes('find') || normalized.includes('get')) {
-    return { ...emptySchema, intent: 'search_photos' };
+    return { ...emptySchema, intent: 'search_photos', person: extractPersonFromMessage(message) };
   }
 
   if (normalized.includes('deliver') || normalized.includes('send') || normalized.includes('share')) {
+    const isWhatsapp = normalized.includes('whatsapp');
+    const isEmail = normalized.includes('mail') || normalized.includes('email');
     return {
       ...emptySchema,
       intent: 'send_photos',
-      platform: normalized.includes('whatsapp') ? 'whatsapp' : 'email'
+      person: extractPersonFromMessage(message),
+      platform: isWhatsapp ? 'whatsapp' : isEmail ? 'email' : 'email'
     };
   }
 
   if (normalized.includes('count') || normalized.includes('how many')) {
-    return { ...emptySchema, intent: 'count_photos' };
+    return { ...emptySchema, intent: 'count_photos', person: extractPersonFromMessage(message) };
   }
 
   return emptySchema;

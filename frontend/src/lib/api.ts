@@ -47,6 +47,7 @@ export type UploadedPhoto = {
 export type PersonSummary = {
   personId: string;
   name: string;
+  email?: string;
   photos: number;
   sampleImageUrl?: string;
   lastLabeledAt?: string;
@@ -316,9 +317,12 @@ export const getPeopleApi = async () => {
   return apiFetch<{ people: PersonSummary[]; count: number }>("/api/people");
 };
 
-export const createPersonApi = async (name: string, photo: File) => {
+export const createPersonApi = async (name: string, photo: File, email?: string) => {
   const formData = new FormData();
   formData.append("name", name);
+  if (String(email || "").trim()) {
+    formData.append("email", String(email).trim());
+  }
   formData.append("photo", photo);
 
   return apiFetch<{
@@ -342,6 +346,11 @@ export const chatWithAgentApi = async (message: string) => {
         delivery?: Record<string, unknown>;
         navigate?: boolean;
         targetUrl?: string;
+        personId?: string;
+        person?: string;
+        photoCount?: number;
+        requiresEmail?: boolean;
+        recipientEmail?: string;
       };
     };
   }>("/api/chat", {
@@ -350,6 +359,33 @@ export const chatWithAgentApi = async (message: string) => {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ message }),
+  });
+};
+
+export const sendChatPhotosEmailApi = async (payload: {
+  personId?: string;
+  person?: string;
+  recipientEmail: string;
+  count?: number;
+}) => {
+  return apiFetch<{
+    success: boolean;
+    result: {
+      action: string;
+      message: string;
+      data?: {
+        photos?: Photo[];
+        personId?: string;
+        person?: string;
+        recipientEmail?: string;
+      };
+    };
+  }>("/api/chat/send-email", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
   });
 };
 

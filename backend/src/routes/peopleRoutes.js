@@ -1,7 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 
-const { getPeople, createPerson } = require('../controllers/peopleController');
+const { getPeople, createPerson, updatePersonEmail } = require('../controllers/peopleController');
 
 const router = express.Router();
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
@@ -48,5 +48,6 @@ router.post('/', (req, res, next) => {
     return res.status(400).json({ success: false, message: error.message });
   });
 }, createPerson);
+router.patch('/:personId/email', updatePersonEmail);
 
 module.exports = router;

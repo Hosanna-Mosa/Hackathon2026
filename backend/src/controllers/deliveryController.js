@@ -203,7 +203,9 @@ const sendEmailDelivery = async (req, res, next) => {
         person,
         subject,
         message,
-        photoLinks
+        photoLinks,
+        senderName: req.user?.name,
+        senderEmail: req.user?.email
       });
 
       delivery.status = 'sent';

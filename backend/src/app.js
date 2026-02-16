@@ -30,6 +30,7 @@ app.use('/api/upload', protect, uploadRoutes);
 app.use('/api/photos', protect, galleryRoutes);
 app.use('/api/chat', protect, chatRoutes);
 app.use('/api/people', protect, peopleRoutes);
+app.use('/api/deliveries', protect, deliveryRoutes);
 app.use('/api', protect, labelRoutes);
 app.use('/api', protect, manualFaceRoutes);
 app.use('/api', protect, faceApiTestRoutes);
