@@ -1,7 +1,9 @@
+const mongoose = require('mongoose');
 const Photo = require('../models/Photo');
 const Person = require('../models/Person');
 const Face = require('../models/Face');
 const Delivery = require('../models/Delivery');
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -127,7 +129,10 @@ const buildPhotoQuery = async (params) => {
 
 const searchPhotos = async (params) => {
     const query = await buildPhotoQuery(params);
-    const limit = params.count ? Number(params.count) : 20;
+    const parsedLimit = Number(params.count);
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(Math.floor(parsedLimit), 50)
+        : 20;
 
     const photos = await Photo.find(query)
         .sort({ date: -1, createdAt: -1 })
@@ -146,6 +151,10 @@ const countPhotos = async (params) => {
 const getStats = async (metric, ownerId) => {
     if (metric === 'most_photos' || metric === 'least_photos') {
         const sort = metric === 'most_photos' ? -1 : 1;
+        const ownerObjectId = mongoose.Types.ObjectId.isValid(userId)
+            ? new mongoose.Types.ObjectId(userId)
+            : null;
+        const matchStage = ownerObjectId ? [{ $match: { ownerId: ownerObjectId } }] : [];
         const stats = await Face.aggregate([
             ...(ownerId ? [{ $match: { ownerId } }] : []),
             {
@@ -191,13 +200,14 @@ const sendPhotos = async (params) => {
     // In a real app, this would use a messaging service
     const { person, platform, count, ownerId } = params;
     const recipient = person || "requested contact";
-    const channel = platform || "email";
+    const channel = String(platform || "email").trim().toLowerCase() === 'whatsapp' ? 'whatsapp' : 'email';
 
     // Log the action
     await Delivery.create({
         ownerId,
         person: recipient,
         type: channel,
+        status: 'sent',
         timestamp: new Date()
     });
 

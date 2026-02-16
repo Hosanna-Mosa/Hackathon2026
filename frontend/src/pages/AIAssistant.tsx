@@ -1,14 +1,26 @@
 import { useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { Send, Sparkles, Bot, Mic, Plus, Clock, MoreVertical } from "lucide-react";
-import { chatWithAgentApi, getChatHistoryApi, type Photo } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { Send, Sparkles, Bot } from "lucide-react";
+import { chatWithAgentApi, sendChatPhotosEmailApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { useAuth } from "@/context/AuthContext";
 
 const suggestedQueries = [
   "Show photos",
   "Show John photos",
   "Send Mom pictures on whatsapp",
   "Find my latest uploads",
+];
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const CHAT_STORAGE_PREFIX = "drishyamitra_assistant_chat";
+const INITIAL_MESSAGES: ChatMessage[] = [
+  {
+    id: "init",
+    role: "assistant",
+    text: "AI Assistant is online. Ask me to fetch photos or log a delivery action.",
+  },
 ];
 
 type ChatMessage = {
@@ -19,8 +31,49 @@ type ChatMessage = {
   photos?: Photo[];
 };
 
+type PendingEmailRequest = {
+  personId?: string;
+  person?: string;
+  photoCount?: number;
+};
+
+const parseStoredMessages = (value: string): ChatMessage[] => {
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return INITIAL_MESSAGES;
+    }
+
+    const messages = parsed
+      .map((item) => {
+        if (!item || typeof item !== "object") {
+          return null;
+        }
+        const cast = item as Partial<ChatMessage>;
+        const role = cast.role === "user" || cast.role === "assistant" ? cast.role : null;
+        const text = typeof cast.text === "string" ? cast.text : "";
+        if (!role || !text.trim()) {
+          return null;
+        }
+        return {
+          id: typeof cast.id === "string" && cast.id.trim() ? cast.id : `${role}-${Date.now()}`,
+          role,
+          text,
+          action: typeof cast.action === "string" ? cast.action : undefined,
+          photos: Array.isArray(cast.photos) ? cast.photos : [],
+        } satisfies ChatMessage;
+      })
+      .filter((item): item is ChatMessage => Boolean(item));
+
+    return messages.length > 0 ? messages : INITIAL_MESSAGES;
+  } catch (_error) {
+    return INITIAL_MESSAGES;
+  }
+};
+
 const AIAssistant = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
   const initialAssistantMessage: ChatMessage = {
@@ -31,6 +84,39 @@ const AIAssistant = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     initialAssistantMessage,
   ]);
+  const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
+  const [pendingEmailRequest, setPendingEmailRequest] = useState<PendingEmailRequest | null>(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+
+  const chatStorageKey = useMemo(
+    () => (user?.id ? `${CHAT_STORAGE_PREFIX}:${user.id}` : ""),
+    [user?.id]
+  );
+
+  useEffect(() => {
+    if (!chatStorageKey || typeof window === "undefined") {
+      setMessages(INITIAL_MESSAGES);
+      return;
+    }
+
+    const raw = window.localStorage.getItem(chatStorageKey);
+    if (!raw) {
+      setMessages(INITIAL_MESSAGES);
+      return;
+    }
+
+    setMessages(parseStoredMessages(raw));
+  }, [chatStorageKey]);
+
+  useEffect(() => {
+    if (!chatStorageKey || typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
+  }, [chatStorageKey, messages]);
 
   useEffect(() => {
     let active = true;
@@ -104,12 +190,22 @@ const AIAssistant = () => {
 
       setMessages((prev) => [...prev, assistantMessage]);
 
-      if (response.result.data?.navigate && response.result.data?.targetUrl) {
-        setTimeout(() => {
-          navigate(response.result.data.targetUrl as string);
-        }, 1500);
+      if (response.result.action === "request_person_email") {
+        setPendingEmailRequest({
+          personId: response.result.data?.personId,
+          person: response.result.data?.person,
+          photoCount: response.result.data?.photoCount,
+        });
+        setEmailInput("");
+        setEmailError("");
+        setIsEmailDialogOpen(true);
       }
 
+      if (response.result.data?.navigate && response.result.data?.targetUrl) {
+        setTimeout(() => {
+          navigate(response.result.data?.targetUrl as string);
+        }, 1500);
+      }
     } catch (err) {
       setMessages((prev) => [
         ...prev,
@@ -124,8 +220,105 @@ const AIAssistant = () => {
     }
   };
 
+  const onSubmitMissingEmail = async () => {
+    if (!pendingEmailRequest || isSubmittingEmail) {
+      return;
+    }
+
+    const email = emailInput.trim().toLowerCase();
+    if (!EMAIL_REGEX.test(email)) {
+      setEmailError("Please enter a valid email address.");
+      return;
+    }
+
+    try {
+      setIsSubmittingEmail(true);
+      setEmailError("");
+
+      const response = await sendChatPhotosEmailApi({
+        personId: pendingEmailRequest.personId,
+        person: pendingEmailRequest.person,
+        recipientEmail: email,
+        count: pendingEmailRequest.photoCount,
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-email-${Date.now()}`,
+          role: "assistant",
+          text: response.result.message,
+          action: response.result.action,
+          photos: response.result.data?.photos || [],
+        },
+      ]);
+
+      setIsEmailDialogOpen(false);
+      setPendingEmailRequest(null);
+      setEmailInput("");
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : "Failed to send photos by email.");
+    } finally {
+      setIsSubmittingEmail(false);
+    }
+  };
+
   return (
     <div className="animate-fade-in flex h-[calc(100vh-7rem)] gap-6">
+      <Dialog
+        open={isEmailDialogOpen}
+        onOpenChange={(open) => {
+          if (!isSubmittingEmail) {
+            setIsEmailDialogOpen(open);
+          }
+          if (!open) {
+            setEmailError("");
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Email To Continue</DialogTitle>
+            <DialogDescription>
+              Enter an email for {pendingEmailRequest?.person || "this person"} to save it and send the photos now.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <input
+              type="email"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+              placeholder="name@example.com"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  void onSubmitMissingEmail();
+                }
+              }}
+            />
+            {emailError && <p className="text-xs text-destructive">{emailError}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-border px-3 py-2 text-sm text-foreground"
+                onClick={() => setIsEmailDialogOpen(false)}
+                disabled={isSubmittingEmail}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+                onClick={() => void onSubmitMissingEmail()}
+                disabled={isSubmittingEmail}
+              >
+                {isSubmittingEmail ? "Sending..." : "Save & Send"}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex flex-1 flex-col rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div className="flex items-center gap-3">
@@ -134,7 +327,7 @@ const AIAssistant = () => {
             </div>
             <div>
               <p className="font-semibold text-foreground">AI Assistant</p>
-              <p className="text-xs text-success">● SYSTEM ONLINE</p>
+              <p className="text-xs text-success">SYSTEM ONLINE</p>
             </div>
           </div>
         </div>
@@ -185,7 +378,7 @@ const AIAssistant = () => {
                 <Bot className="h-4 w-4 text-primary-foreground" />
               </div>
               <div className="rounded-xl rounded-tl-none border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-                <span className="animate-pulse-soft">● ● ●</span> Drishyamitra is thinking...
+                <span className="animate-pulse-soft">. . .</span> Drishyamitra is thinking...
               </div>
             </div>
           )}
@@ -237,8 +430,8 @@ const AIAssistant = () => {
           <h3 className="text-xs font-bold uppercase text-muted-foreground">Agent Capability</h3>
           <div className="mt-3 space-y-2 text-sm text-foreground">
             <p>1. Fetch photos by person intent</p>
-            <p>2. Trigger delivery log simulation</p>
-            <p>3. Route unknown intents to assistant reply</p>
+            <p>2. Send person photos by email</p>
+            <p>3. Ask and save missing recipient email</p>
           </div>
         </div>
       </div>

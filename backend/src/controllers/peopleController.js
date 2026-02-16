@@ -7,6 +7,8 @@ const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
 const INVALID_PERSON_LABELS = new Set(['unknown', 'unknown_person', 'unknown person']);
+const normalizePersonEmail = (value) => String(value || '').trim().toLowerCase();
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LABEL_MIN_FACE_CONFIDENCE = Number(process.env.LABEL_MIN_FACE_CONFIDENCE || 0.9);
 
 const getPeople = async (req, res, next) => {
@@ -85,6 +87,7 @@ const getPeople = async (req, res, next) => {
           _id: 0,
           personId: { $toString: '$_id' },
           name: '$name',
+          email: { $ifNull: ['$email', ''] },
           photos: '$photos',
           sampleImageUrl: {
             $cond: [
@@ -135,6 +138,7 @@ const createPerson = async (req, res, next) => {
     }
 
     const name = normalizePersonName(req.body?.name);
+    const email = normalizePersonEmail(req.body?.email);
 
     if (!name) {
       return res.status(400).json({
@@ -146,6 +150,10 @@ const createPerson = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'Please enter a real person name. "unknown" labels are not allowed.'
+    if (email && !EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is invalid.'
       });
     }
     if (!req.file) {
@@ -200,6 +208,7 @@ const createPerson = async (req, res, next) => {
     const person = await Person.create({
       ownerId: userId,
       name,
+      email,
       embeddings: embedding.length > 0 ? [embedding] : [],
       averageEmbedding: embedding.length > 0 ? embedding : [],
       imageUrl
@@ -215,6 +224,7 @@ const createPerson = async (req, res, next) => {
       person: {
         personId: String(person._id),
         name: person.name,
+        email: person.email || '',
         photos: 0,
         sampleImageUrl: person.imageUrl
       }
@@ -230,7 +240,74 @@ const createPerson = async (req, res, next) => {
   }
 };
 
+const updatePersonEmail = async (req, res, next) => {
+  try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
+    const personId = String(req.params?.personId || '').trim();
+    if (!mongoose.Types.ObjectId.isValid(personId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid person id.'
+      });
+    }
+
+    const email = normalizePersonEmail(req.body?.email);
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is required.'
+      });
+    }
+    if (!EMAIL_REGEX.test(email)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email is invalid.'
+      });
+    }
+
+    const person = await Person.findOneAndUpdate(
+      {
+        _id: personId,
+        ownerId: userId
+      },
+      {
+        $set: { email }
+      },
+      {
+        new: true
+      }
+    );
+
+    if (!person) {
+      return res.status(404).json({
+        success: false,
+        message: 'Person not found.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Email saved for ${person.name}.`,
+      person: {
+        personId: String(person._id),
+        name: person.name,
+        email: person.email || ''
+      }
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   getPeople,
-  createPerson
+  createPerson,
+  updatePersonEmail
 };

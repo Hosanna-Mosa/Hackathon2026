@@ -12,6 +12,7 @@ const People = () => {
   const [people, setPeople] = useState<PersonSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [newPersonName, setNewPersonName] = useState("");
+  const [newPersonEmail, setNewPersonEmail] = useState("");
   const [newPersonPhoto, setNewPersonPhoto] = useState<File | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -67,8 +68,9 @@ const People = () => {
     try {
       setIsCreating(true);
       setActionError("");
-      await createPersonApi(name, newPersonPhoto);
+      await createPersonApi(name, newPersonPhoto, newPersonEmail.trim());
       setNewPersonName("");
+      setNewPersonEmail("");
       setNewPersonPhoto(null);
       await loadPeople();
     } catch (err) {
@@ -221,6 +223,17 @@ const People = () => {
                       void onCreatePerson();
                     }
                   }}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">Email (Optional)</label>
+                <input
+                  type="email"
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  placeholder="Enter email address"
+                  value={newPersonEmail}
+                  onChange={(e) => setNewPersonEmail(e.target.value)}
                 />
               </div>
 
