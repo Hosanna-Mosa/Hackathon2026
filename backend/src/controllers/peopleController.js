@@ -6,6 +6,7 @@ const { uploadPersonDpFromImageBuffer } = require('../services/personDpService')
 const { linkEntitiesToUser } = require('../services/userEntityLinkService');
 
 const normalizePersonName = (value) => String(value || '').trim().toLowerCase();
+const INVALID_PERSON_LABELS = new Set(['unknown', 'unknown_person', 'unknown person']);
 const normalizePersonEmail = (value) => String(value || '').trim().toLowerCase();
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LABEL_MIN_FACE_CONFIDENCE = Number(process.env.LABEL_MIN_FACE_CONFIDENCE || 0.9);
@@ -88,7 +89,24 @@ const getPeople = async (req, res, next) => {
           name: '$name',
           email: { $ifNull: ['$email', ''] },
           photos: '$photos',
-          sampleImageUrl: { $ifNull: ['$latestPhoto.imageUrl', '$imageUrl'] },
+          sampleImageUrl: {
+            $cond: [
+              {
+                $gt: [
+                  {
+                    $strLenCP: {
+                      $trim: {
+                        input: { $ifNull: ['$imageUrl', ''] }
+                      }
+                    }
+                  },
+                  0
+                ]
+              },
+              '$imageUrl',
+              '$latestPhoto.imageUrl'
+            ]
+          },
           lastLabeledAt: '$latestFace.createdAt'
         }
       },
@@ -128,6 +146,10 @@ const createPerson = async (req, res, next) => {
         message: 'Name is required.'
       });
     }
+    if (INVALID_PERSON_LABELS.has(name)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please enter a real person name. "unknown" labels are not allowed.'
     if (email && !EMAIL_REGEX.test(email)) {
       return res.status(400).json({
         success: false,

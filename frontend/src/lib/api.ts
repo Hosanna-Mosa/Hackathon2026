@@ -4,6 +4,7 @@ export type Photo = {
   _id: string;
   imageUrl?: string;
   folder?: string;
+  analyzed?: boolean;
   // Backward-compat fields for older photo documents/responses.
   filename?: string;
   path?: string;
@@ -87,6 +88,29 @@ export type DeliveryStats = {
     whatsapp: number;
     direct_link: number;
   };
+};
+
+export type ChatHistoryEntry = {
+  _id: string;
+  ownerId: string;
+  prompt: string;
+  command: string;
+  status: "success" | "failed";
+  agentDecision: Record<string, unknown> | null;
+  assistant: {
+    action: string;
+    message: string;
+    data?: {
+      photos?: Photo[];
+      delivery?: Record<string, unknown>;
+      navigate?: boolean;
+      targetUrl?: string;
+      [key: string]: unknown;
+    } | null;
+  };
+  errorMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type ApiError = {
@@ -362,6 +386,13 @@ export const chatWithAgentApi = async (message: string) => {
   });
 };
 
+export const getChatHistoryApi = async (limit = 50) => {
+  const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.trunc(limit)) : 50;
+  return apiFetch<{
+    success: boolean;
+    count: number;
+    history: ChatHistoryEntry[];
+  }>(`/api/chat/history?limit=${safeLimit}`);
 export const sendChatPhotosEmailApi = async (payload: {
   personId?: string;
   person?: string;

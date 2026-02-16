@@ -5,6 +5,8 @@ const Face = require('../models/Face');
 const Delivery = require('../models/Delivery');
 const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const escapeRegex = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Resolves a date string into a MongoDB date range query.
  * Handles: "today", "yesterday", "last week", "last month", "last year", "2024", "YYYY-MM-DD"
@@ -59,42 +61,34 @@ const parseDateRange = (dateStr) => {
  * Builds a MongoDB query object based on structured parameters.
  */
 const buildPhotoQuery = async (params) => {
-    const query = {};
-    const { userId, person, event, location, date_range, tags } = params;
-
-    if (userId) {
-        query.ownerId = userId;
-    }
+    const { person, event, location, date_range, tags, ownerId } = params;
+    const query = ownerId ? { ownerId } : {};
 
     // 1. Person Filter (Complex because it involves Face join)
     let photoIdsFromFaces = null;
 
     if (person) {
-        // Try to find the person
         const safePerson = escapeRegex(person.trim());
-        const personFilters = { name: { $regex: new RegExp(`^${safePerson}$`, 'i') } };
-        if (userId) {
-            personFilters.ownerId = userId;
-        }
-        const personDoc = await Person.findOne(personFilters) || await Person.findOne({
-            ...(userId ? { ownerId: userId } : {}),
+        const personBaseQuery = ownerId ? { ownerId } : {};
+
+        // Try to find the person
+        const personDoc = await Person.findOne({
+            ...personBaseQuery,
+            name: { $regex: new RegExp(`^${safePerson}$`, 'i') }
+        }) || await Person.findOne({
+            ...personBaseQuery,
             name: { $regex: new RegExp(safePerson, 'i') }
         });
 
         if (personDoc) {
-            const faceQuery = { personId: personDoc._id };
-            if (userId) {
-                faceQuery.ownerId = userId;
-            }
+            const faceQuery = ownerId
+                ? { ownerId, personId: personDoc._id }
+                : { personId: personDoc._id };
             const faces = await Face.find(faceQuery).select('photoId');
             photoIdsFromFaces = faces.map(f => f.photoId);
         } else {
-            // If specific person requested but not found, ensure no results (or handle gracefully)
-            // For now, return a query that finds nothing
-            return {
-                ...(userId ? { ownerId: userId } : {}),
-                _id: { $in: [] }
-            };
+            // Fallback for legacy photo documents where names may be in detectedPersons.
+            query.detectedPersons = { $elemMatch: { $regex: new RegExp(`^${safePerson}$`, 'i') } };
         }
     }
 
@@ -124,6 +118,9 @@ const buildPhotoQuery = async (params) => {
 
     // Combine Photo IDs from Person lookup
     if (photoIdsFromFaces !== null) {
+        if (photoIdsFromFaces.length === 0) {
+            return { ...query, _id: { $in: [] } };
+        }
         query._id = { $in: photoIdsFromFaces };
     }
 
@@ -151,7 +148,7 @@ const countPhotos = async (params) => {
     return count;
 };
 
-const getStats = async (metric, userId) => {
+const getStats = async (metric, ownerId) => {
     if (metric === 'most_photos' || metric === 'least_photos') {
         const sort = metric === 'most_photos' ? -1 : 1;
         const ownerObjectId = mongoose.Types.ObjectId.isValid(userId)
@@ -159,7 +156,7 @@ const getStats = async (metric, userId) => {
             : null;
         const matchStage = ownerObjectId ? [{ $match: { ownerId: ownerObjectId } }] : [];
         const stats = await Face.aggregate([
-            ...matchStage,
+            ...(ownerId ? [{ $match: { ownerId } }] : []),
             {
                 $group: {
                     _id: '$personId',
@@ -186,7 +183,7 @@ const getStats = async (metric, userId) => {
         if (stats.length > 0) {
             const person = await Person.findOne({
                 _id: stats[0]._id,
-                ...(ownerObjectId ? { ownerId: ownerObjectId } : {})
+                ...(ownerId ? { ownerId } : {})
             });
             return {
                 person: person ? person.name : 'Unknown',
@@ -201,13 +198,13 @@ const getStats = async (metric, userId) => {
 const sendPhotos = async (params) => {
     // Simulation of sending
     // In a real app, this would use a messaging service
-    const { person, platform, userId } = params;
+    const { person, platform, count, ownerId } = params;
     const recipient = person || "requested contact";
     const channel = String(platform || "email").trim().toLowerCase() === 'whatsapp' ? 'whatsapp' : 'email';
 
     // Log the action
     await Delivery.create({
-        ownerId: userId,
+        ownerId,
         person: recipient,
         type: channel,
         status: 'sent',

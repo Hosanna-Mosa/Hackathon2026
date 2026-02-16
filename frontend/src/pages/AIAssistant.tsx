@@ -76,6 +76,14 @@ const AIAssistant = () => {
   const { user } = useAuth();
   const [input, setInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const initialAssistantMessage: ChatMessage = {
+    id: "init",
+    role: "assistant",
+    text: "AI Assistant is online. Ask me to fetch photos or log a delivery action.",
+  };
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    initialAssistantMessage,
+  ]);
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
   const [pendingEmailRequest, setPendingEmailRequest] = useState<PendingEmailRequest | null>(null);
   const [emailInput, setEmailInput] = useState("");
@@ -109,6 +117,51 @@ const AIAssistant = () => {
     }
     window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
   }, [chatStorageKey, messages]);
+
+  useEffect(() => {
+    let active = true;
+    const loadHistory = async () => {
+      try {
+        const response = await getChatHistoryApi(50);
+        if (!active) return;
+
+        const rebuilt = response.history
+          .slice()
+          .reverse()
+          .flatMap((entry) => {
+            const assistantText =
+              entry.status === "failed"
+                ? entry.errorMessage || "Failed to process request."
+                : entry.assistant?.message || "No assistant response.";
+            return [
+              {
+                id: `history-user-${entry._id}`,
+                role: "user" as const,
+                text: entry.prompt,
+              },
+              {
+                id: `history-assistant-${entry._id}`,
+                role: "assistant" as const,
+                text: assistantText,
+                action: entry.assistant?.action,
+                photos: entry.assistant?.data?.photos || [],
+              },
+            ];
+          });
+
+        setMessages(rebuilt.length > 0 ? rebuilt : [initialAssistantMessage]);
+      } catch (_error) {
+        if (active) {
+          setMessages([initialAssistantMessage]);
+        }
+      }
+    };
+
+    loadHistory();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const sendMessage = async (rawMessage?: string) => {
     const message = (rawMessage ?? input).trim();
@@ -277,7 +330,6 @@ const AIAssistant = () => {
               <p className="text-xs text-success">SYSTEM ONLINE</p>
             </div>
           </div>
-          <div />
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5">

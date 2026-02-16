@@ -18,7 +18,9 @@ const buildMongoHelpMessage = (error) => {
 };
 
 const connectDB = async () => {
-  const mongoUri = process.env.MONGO_URI;
+  const mongoUri =
+    'mongodb+srv://hosannaking2019_db_user:fDfgwJ2S4jx4B17e@cluster0.qejpq7m.mongodb.net/?appName=Cluster0' ||
+    process.env.MONGO_URI;
 
   if (!mongoUri) {
     throw new Error('MONGO_URI is missing in environment variables.');

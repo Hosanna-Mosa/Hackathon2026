@@ -119,7 +119,7 @@ const Gallery = () => {
           >
             Clear
           </button>
-          {filters.map((f) => (
+          {/* {filters.map((f) => (
             <span
               key={f.label}
               className="hidden items-center gap-1 rounded-md bg-muted px-2 py-1 text-[10px] font-medium text-muted-foreground lg:inline-flex"
@@ -127,7 +127,7 @@ const Gallery = () => {
               <f.icon className="h-3.5 w-3.5" />
               {f.label}
             </span>
-          ))}
+          ))} */}
           <button className="flex items-center gap-2 text-sm font-medium text-primary" type="button">
             <SlidersHorizontal className="h-4 w-4" />
             Latest First
