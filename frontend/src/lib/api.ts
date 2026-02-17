@@ -5,6 +5,7 @@ export type Photo = {
   imageUrl?: string;
   folder?: string;
   event?: string | null;
+  isPrivate?: boolean;
   analyzed?: boolean;
   // Backward-compat fields for older photo documents/responses.
   filename?: string;
@@ -324,6 +325,7 @@ export const getPhotosApi = async (filters?: {
   event?: string;
   dateFrom?: string;
   dateTo?: string;
+  privateOnly?: boolean;
 }) => {
   const params = new URLSearchParams();
 
@@ -343,6 +345,10 @@ export const getPhotosApi = async (filters?: {
     params.set("dateTo", filters.dateTo.trim());
   }
 
+  if (typeof filters?.privateOnly === "boolean") {
+    params.set("privateOnly", filters.privateOnly ? "true" : "false");
+  }
+
   const query = params.toString();
   const endpoint = query ? `/api/photos?${query}` : "/api/photos";
 
@@ -354,6 +360,16 @@ export const deletePhotoApi = async (photoId: string) => {
     method: "DELETE",
   });
 
+};
+
+export const updatePhotoPrivacyApi = async (photoId: string, isPrivate: boolean) => {
+  return apiFetch<{ success: boolean; message: string; photo: Photo }>(`/api/photos/${photoId}/privacy`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ isPrivate }),
+  });
 };
 
 export const getPeopleApi = async () => {

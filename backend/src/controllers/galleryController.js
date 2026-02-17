@@ -44,6 +44,21 @@ const buildDateFilter = (dateFrom, dateTo) => {
   return { createdAt };
 };
 
+const parseBooleanFlag = (value) => {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return null;
+};
+
 const getPhotos = async (req, res, next) => {
   try {
     const userId = String(req.userId || '').trim();
@@ -54,12 +69,17 @@ const getPhotos = async (req, res, next) => {
       });
     }
 
-    const { person, dateFrom, dateTo, event } = req.query;
+    const { person, dateFrom, dateTo, event, privateOnly } = req.query;
     const dateFilter = buildDateFilter(dateFrom, dateTo);
     const eventValue = String(event || '').trim();
     const eventFilter = eventValue
       ? { event: { $regex: escapeRegex(eventValue), $options: 'i' } }
       : null;
+    const privateFlag = parseBooleanFlag(privateOnly);
+    const privacyFilter =
+      privateFlag === true
+        ? { isPrivate: true }
+        : { isPrivate: { $ne: true } };
 
     if (person) {
       const safePerson = escapeRegex(String(person).trim());
@@ -79,7 +99,8 @@ const getPhotos = async (req, res, next) => {
 
       const photoQuery = {
         ownerId: userId,
-        _id: { $in: photoIds }
+        _id: { $in: photoIds },
+        ...privacyFilter
       };
       if (dateFilter?.createdAt) {
         photoQuery.createdAt = dateFilter.createdAt;
@@ -99,7 +120,8 @@ const getPhotos = async (req, res, next) => {
     const query = {
       ownerId: userId,
       ...(dateFilter || {}),
-      ...(eventFilter || {})
+      ...(eventFilter || {}),
+      ...privacyFilter
     };
     const photos = await Photo.find(query).sort({ createdAt: -1 });
 
@@ -144,7 +166,57 @@ const deletePhoto = async (req, res, next) => {
   }
 };
 
+const updatePhotoPrivacy = async (req, res, next) => {
+  try {
+    const userId = String(req.userId || '').trim();
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized request.'
+      });
+    }
+
+    const photoId = String(req.params?.id || '').trim();
+    if (!photoId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Photo id is required.'
+      });
+    }
+
+    const privateFlag = parseBooleanFlag(req.body?.isPrivate);
+    if (privateFlag === null) {
+      return res.status(400).json({
+        success: false,
+        message: 'isPrivate must be true or false.'
+      });
+    }
+
+    const photo = await Photo.findOneAndUpdate(
+      { _id: photoId, ownerId: userId },
+      { $set: { isPrivate: privateFlag } },
+      { new: true }
+    );
+
+    if (!photo) {
+      return res.status(404).json({
+        success: false,
+        message: 'Photo not found.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: privateFlag ? 'Photo moved to private gallery.' : 'Photo removed from private gallery.',
+      photo
+    });
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   getPhotos,
+  updatePhotoPrivacy,
   deletePhoto
 };

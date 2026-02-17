@@ -1,10 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
-import { Camera, LayoutDashboard, Image, Users, Bot, Upload, Send, LogOut } from "lucide-react";
+import { Camera, LayoutDashboard, Image, Users, Bot, Upload, Send, LogOut, Lock } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
 const navItems = [
   { icon: LayoutDashboard, label: "Dashboard", path: "/" },
   { icon: Image, label: "Gallery", path: "/gallery" },
+  { icon: Lock, label: "Private Gallery", path: "/private-gallery" },
   { icon: Users, label: "People", path: "/people" },
   { icon: Upload, label: "Upload Center", path: "/upload" },
   { icon: Send, label: "Deliveries", path: "/deliveries" },

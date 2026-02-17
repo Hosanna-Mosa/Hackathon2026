@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Users, Calendar, SlidersHorizontal, Upload, MessageCircle, X, ZoomIn, ZoomOut, Download, Trash2, Maximize2, PartyPopper } from "lucide-react";
-import { getPhotosApi, deletePhotoApi, type Photo } from "@/lib/api";
+import { Users, Calendar, SlidersHorizontal, Upload, X, ZoomIn, ZoomOut, Download, Trash2, PartyPopper, Lock, Unlock } from "lucide-react";
+import { getPhotosApi, deletePhotoApi, updatePhotoPrivacyApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
-
-const filters = [
-  { icon: Users, label: "Person" },
-  { icon: PartyPopper, label: "Event" },
-  { icon: Calendar, label: "Date" },
-];
 
 const Gallery = () => {
   const navigate = useNavigate();
@@ -24,12 +18,16 @@ const Gallery = () => {
   const [error, setError] = useState("");
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [updatingPhotoId, setUpdatingPhotoId] = useState<string | null>(null);
 
-  const loadPhotos = useCallback(async (filtersInput?: { person?: string; dateFrom?: string; dateTo?: string }) => {
+  const loadPhotos = useCallback(async (filtersInput?: { person?: string; event?: string; dateFrom?: string; dateTo?: string }) => {
     try {
       setLoading(true);
       setError("");
-      const data = await getPhotosApi(filtersInput);
+      const data = await getPhotosApi({
+        ...filtersInput,
+        privateOnly: false,
+      });
       setPhotos(data.photos);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load photos.");
@@ -131,6 +129,21 @@ const Gallery = () => {
   const handlePhotoClick = (photo: Photo) => {
     setSelectedPhoto(photo);
     setZoomLevel(1);
+  };
+
+  const handleTogglePrivacy = async (e: React.MouseEvent, photo: Photo, makePrivate: boolean) => {
+    e.stopPropagation();
+    try {
+      setUpdatingPhotoId(photo._id);
+      const response = await updatePhotoPrivacyApi(photo._id, makePrivate);
+      const updated = response.photo;
+      setPhotos((prev) => prev.map((item) => (item._id === photo._id ? { ...item, isPrivate: updated.isPrivate } : item)));
+      setSelectedPhoto((prev) => (prev && prev._id === photo._id ? { ...prev, isPrivate: updated.isPrivate } : prev));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update privacy.");
+    } finally {
+      setUpdatingPhotoId(null);
+    }
   };
 
   const handleZoomIn = (e: React.MouseEvent) => {
@@ -248,6 +261,14 @@ const Gallery = () => {
                   {/* Action Buttons on Card */}
                   <div className="absolute top-2 right-2 flex gap-2 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
                     <button
+                      onClick={(e) => handleTogglePrivacy(e, photo, !photo.isPrivate)}
+                      className="rounded-full bg-black/40 p-1.5 text-white backdrop-blur-sm transition-colors hover:bg-black/60 disabled:opacity-60"
+                      title={photo.isPrivate ? "Make Public" : "Make Private"}
+                      disabled={updatingPhotoId === photo._id}
+                    >
+                      {photo.isPrivate ? <Unlock className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
                       onClick={(e) => handleDownload(e, photo)}
                       className="rounded-full bg-black/40 p-1.5 text-white backdrop-blur-sm transition-colors hover:bg-black/60"
                       title="Download"
@@ -268,6 +289,12 @@ const Gallery = () => {
                       {photo.detectedPersons[0]}
                     </span>
                   )}
+                  {photo.isPrivate && (
+                    <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[10px] font-semibold text-white">
+                      <Lock className="h-3 w-3" />
+                      Private
+                    </span>
+                  )}
                 </div>
               ))}
             </div>
@@ -275,14 +302,6 @@ const Gallery = () => {
         ))}
       </div>
 
-      <button
-        className="fixed bottom-6 right-6 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-110"
-        type="button"
-        onClick={() => navigate("/assistant")}
-      >
-        <MessageCircle className="h-6 w-6" />
-        <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card bg-destructive" />
-      </button>
       {/* Image Zoom Modal */}
       {selectedPhoto && (
         <div
@@ -343,6 +362,15 @@ const Gallery = () => {
             </button>
 
             <div className="mx-2 h-6 w-px bg-white/20" />
+
+            <button
+              onClick={(e) => handleTogglePrivacy(e, selectedPhoto, !selectedPhoto.isPrivate)}
+              className="p-2 text-white/80 transition-colors hover:text-white disabled:opacity-50"
+              title={selectedPhoto.isPrivate ? "Make Public" : "Make Private"}
+              disabled={updatingPhotoId === selectedPhoto._id}
+            >
+              {selectedPhoto.isPrivate ? <Unlock className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+            </button>
 
             <button
               onClick={(e) => handleDownload(e, selectedPhoto)}

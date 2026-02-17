@@ -68,6 +68,11 @@ const photoSchema = new mongoose.Schema(
     analyzed: {
       type: Boolean,
       default: false
+    },
+    isPrivate: {
+      type: Boolean,
+      default: false,
+      index: true
     }
   },
   {
