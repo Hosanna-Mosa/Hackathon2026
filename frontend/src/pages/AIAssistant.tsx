@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Send, Sparkles, Bot } from "lucide-react";
+import { Send, Sparkles, Bot, Mic, Square } from "lucide-react";
 import { chatWithAgentApi, sendChatPhotosEmailApi, getChatHistoryApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -36,6 +36,28 @@ type PendingEmailRequest = {
   person?: string;
   photoCount?: number;
 };
+
+type SpeechRecognitionResultChunk = {
+  transcript: string;
+};
+
+type SpeechRecognitionEventLike = Event & {
+  resultIndex: number;
+  results: ArrayLike<ArrayLike<SpeechRecognitionResultChunk> & { isFinal?: boolean }>;
+};
+
+type SpeechRecognitionLike = EventTarget & {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 const parseStoredMessages = (value: string): ChatMessage[] => {
   try {
@@ -83,8 +105,12 @@ const AIAssistant = () => {
   const [emailError, setEmailError] = useState("");
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const [isListening, setIsListening] = useState(false);
+  const [supportsSpeechRecognition, setSupportsSpeechRecognition] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const transcriptBufferRef = useRef("");
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -166,6 +192,69 @@ const AIAssistant = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const speechWindow = window as Window & {
+      SpeechRecognition?: SpeechRecognitionConstructor;
+      webkitSpeechRecognition?: SpeechRecognitionConstructor;
+    };
+    const SpeechRecognitionImpl = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognitionImpl) {
+      setSupportsSpeechRecognition(false);
+      return;
+    }
+
+    setSupportsSpeechRecognition(true);
+    const recognition = new SpeechRecognitionImpl();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    recognition.onresult = (event) => {
+      let finalTranscript = "";
+      let interimTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        const transcript = result?.[0]?.transcript || "";
+        if (result?.isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (finalTranscript) {
+        transcriptBufferRef.current = `${transcriptBufferRef.current} ${finalTranscript}`.trim();
+      }
+
+      const preview = `${transcriptBufferRef.current} ${interimTranscript}`.trim();
+      setInput(preview);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      const transcript = transcriptBufferRef.current.trim();
+      transcriptBufferRef.current = "";
+      if (transcript) {
+        setInput((prev) => transcript || prev);
+      }
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
+
   const sendMessage = async (rawMessage?: string) => {
     const message = (rawMessage ?? input).trim();
     if (!message || isSending) return;
@@ -221,6 +310,35 @@ const AIAssistant = () => {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const onToggleListening = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition || isSending) {
+      return;
+    }
+
+    if (isListening) {
+      recognition.stop();
+      return;
+    }
+
+    transcriptBufferRef.current = "";
+    setInput("");
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch (_error) {
+      setIsListening(false);
+    }
+  };
+
+  const onStopListening = () => {
+    const recognition = recognitionRef.current;
+    if (!recognition || !isListening) {
+      return;
+    }
+    recognition.stop();
   };
 
   const onSubmitMissingEmail = async () => {
@@ -416,6 +534,31 @@ const AIAssistant = () => {
               placeholder="Ask Drishyamitra to find a memory..."
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
             />
+            {supportsSpeechRecognition && (
+              <button
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary text-secondary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                onClick={onToggleListening}
+                disabled={isSending || isListening}
+                aria-label="Start voice input"
+                title="Start listening"
+              >
+                <Mic className="h-4 w-4" />
+              </button>
+            )}
+            {supportsSpeechRecognition && isListening && (
+              <button
+                className="flex h-10 items-center gap-2 rounded-lg bg-destructive px-3 text-xs font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                type="button"
+                onClick={onStopListening}
+                disabled={isSending}
+                aria-label="Stop voice input"
+                title="Stop listening"
+              >
+                <Square className="h-3.5 w-3.5" />
+                Stop
+              </button>
+            )}
             <button
               className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               type="button"
