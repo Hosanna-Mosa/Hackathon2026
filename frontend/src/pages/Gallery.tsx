@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Users, Calendar, SlidersHorizontal, Upload, MessageCircle, X, ZoomIn, ZoomOut, Download, Trash2, Maximize2 } from "lucide-react";
+import { Users, Calendar, SlidersHorizontal, Upload, MessageCircle, X, ZoomIn, ZoomOut, Download, Trash2, Maximize2, PartyPopper } from "lucide-react";
 import { getPhotosApi, deletePhotoApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 
 const filters = [
   { icon: Users, label: "Person" },
+  { icon: PartyPopper, label: "Event" },
   { icon: Calendar, label: "Date" },
 ];
 
@@ -13,8 +14,10 @@ const Gallery = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryPerson = useMemo(() => (searchParams.get("person") || "").trim(), [searchParams]);
+  const queryEvent = useMemo(() => (searchParams.get("event") || "").trim(), [searchParams]);
   const queryDate = useMemo(() => (searchParams.get("date") || "").trim(), [searchParams]);
   const [person, setPerson] = useState("");
+  const [event, setEvent] = useState("");
   const [date, setDate] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -37,21 +40,27 @@ const Gallery = () => {
 
   useEffect(() => {
     setPerson(queryPerson);
+    setEvent(queryEvent);
     setDate(queryDate);
     void loadPhotos({
       person: queryPerson || undefined,
+      event: queryEvent || undefined,
       dateFrom: queryDate || undefined,
       dateTo: queryDate || undefined,
     });
-  }, [loadPhotos, queryDate, queryPerson]);
+  }, [loadPhotos, queryDate, queryEvent, queryPerson]);
 
   const onApplyFilters = () => {
     const next = new URLSearchParams();
     const personValue = person.trim();
+    const eventValue = event.trim();
     const dateValue = date.trim();
 
     if (personValue) {
       next.set("person", personValue);
+    }
+    if (eventValue) {
+      next.set("event", eventValue);
     }
     if (dateValue) {
       next.set("date", dateValue);
@@ -62,6 +71,7 @@ const Gallery = () => {
 
   const onClearFilters = () => {
     setPerson("");
+    setEvent("");
     setDate("");
     setSearchParams({});
   };
@@ -143,6 +153,15 @@ const Gallery = () => {
               value={person}
               onChange={(e) => setPerson(e.target.value)}
               placeholder="Filter by person"
+              className="w-40 bg-transparent px-2 py-1 text-sm text-foreground outline-none"
+            />
+          </div>
+          <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1">
+            <PartyPopper className="h-4 w-4 text-muted-foreground" />
+            <input
+              value={event}
+              onChange={(e) => setEvent(e.target.value)}
+              placeholder="Filter by event"
               className="w-40 bg-transparent px-2 py-1 text-sm text-foreground outline-none"
             />
           </div>

@@ -38,6 +38,14 @@ const resolveFaceOrder = (rawOrder) => {
   return ALLOWED_FACE_ORDER.has(normalized) ? normalized : 'left_to_right';
 };
 
+const normalizeEvent = (rawEvent) => {
+  const value = String(rawEvent || '').trim();
+  if (!value) {
+    return null;
+  }
+  return value.slice(0, 120);
+};
+
 const shouldRunFaceApiComparison = (req) => {
   const queryFlag = toBoolean(req?.query?.compareFaceApi);
   const bodyFlag = toBoolean(req?.body?.compareFaceApi);
@@ -103,6 +111,7 @@ const uploadPhotos = async (req, res, next) => {
 
     validateFiles(req.files);
     const faceOrder = resolveFaceOrder(req.body?.faceOrder);
+    const event = normalizeEvent(req.body?.event);
     const runFaceApiComparison = shouldRunFaceApiComparison(req);
 
     // Start cloud upload and face detection in parallel
@@ -195,6 +204,7 @@ const uploadPhotos = async (req, res, next) => {
         ownerId: userId,
         imageUrl,
         folder,
+        event,
         faceCount: detection.validFaces,
         detectionResult: detection
       });
@@ -388,6 +398,7 @@ const uploadPhotos = async (req, res, next) => {
       savedPhotos.push({
         photoId: String(photo._id),
         imageUrl: photo.imageUrl,
+        event: photo.event || null,
         faceOrder,
         faces: persistedFaces
       });

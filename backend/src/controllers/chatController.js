@@ -409,7 +409,7 @@ const chatWithAgent = async (req, res, next) => {
         if (hasPhotos) {
           const queryParams = new URLSearchParams();
           if (person) queryParams.set('person', person);
-          if (event) queryParams.set('search', event); // Assuming gallery has generic search
+          if (event) queryParams.set('event', event);
           if (location) queryParams.set('location', location);
 
           const queryString = queryParams.toString();

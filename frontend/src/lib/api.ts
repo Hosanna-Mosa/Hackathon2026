@@ -4,6 +4,7 @@ export type Photo = {
   _id: string;
   imageUrl?: string;
   folder?: string;
+  event?: string | null;
   analyzed?: boolean;
   // Backward-compat fields for older photo documents/responses.
   filename?: string;
@@ -41,6 +42,7 @@ export type UploadedFace = {
 export type UploadedPhoto = {
   photoId: string;
   imageUrl?: string;
+  event?: string | null;
   faceOrder?: "left_to_right" | "right_to_left";
   faces: UploadedFace[];
 };
@@ -231,7 +233,8 @@ export const getMeApi = async () => {
 
 export const uploadPhotosApi = async (
   files: File[],
-  faceOrder: "left_to_right" | "right_to_left" = "left_to_right"
+  faceOrder: "left_to_right" | "right_to_left" = "left_to_right",
+  event?: string
 ) => {
   const formData = new FormData();
 
@@ -239,6 +242,10 @@ export const uploadPhotosApi = async (
     formData.append("photos", file);
   });
   formData.append("faceOrder", faceOrder);
+  const trimmedEvent = String(event || "").trim();
+  if (trimmedEvent) {
+    formData.append("event", trimmedEvent);
+  }
 
   debugLog(
     "upload:files",
@@ -314,6 +321,7 @@ export const manualFaceLabelApi = async (payload: {
 
 export const getPhotosApi = async (filters?: {
   person?: string;
+  event?: string;
   dateFrom?: string;
   dateTo?: string;
 }) => {
@@ -321,6 +329,10 @@ export const getPhotosApi = async (filters?: {
 
   if (filters?.person?.trim()) {
     params.set("person", filters.person.trim());
+  }
+
+  if (filters?.event?.trim()) {
+    params.set("event", filters.event.trim());
   }
 
   if (filters?.dateFrom?.trim()) {

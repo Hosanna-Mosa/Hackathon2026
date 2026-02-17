@@ -27,6 +27,36 @@ const extractPersonFromMessage = (message) => {
   return null;
 };
 
+const extractEventFromMessage = (message) => {
+  const text = String(message || '').trim();
+  if (!text) {
+    return null;
+  }
+
+  const patterns = [
+    /\b(?:show|find|get|search)\s+([a-z][a-z0-9\s'.-]{1,80}?)\s+(?:photos|pictures|pics)\b/i,
+    /\b(?:photos|pictures|pics)\s+(?:from|of)\s+([a-z][a-z0-9\s'.-]{1,80}?)(?=\s+(?:in|at|for|on|to|via)\b|[?.!,]|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1]) {
+      continue;
+    }
+
+    const candidate = String(match[1] || '')
+      .replace(/\b(my|our|the|all|latest|old|recent)\b/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return null;
+};
+
 const parseIntentFallback = (message) => {
   const normalized = String(message || '').toLowerCase();
 
@@ -54,12 +84,34 @@ const parseIntentFallback = (message) => {
 
   // 2. Check for COUNT intent
   if (normalized.includes('count') || normalized.includes('how many')) {
-    return { ...emptySchema, intent: 'count_photos', person: extractPersonFromMessage(message) };
+    const person = extractPersonFromMessage(message);
+    const inferredEvent = extractEventFromMessage(message);
+    const event =
+      person && inferredEvent && person.trim().toLowerCase() === inferredEvent.trim().toLowerCase()
+        ? null
+        : inferredEvent;
+    return {
+      ...emptySchema,
+      intent: 'count_photos',
+      person,
+      event
+    };
   }
 
   // 3. Check for SEARCH intent (show, find, get, or just "photos of...")
   if (normalized.includes('show') || normalized.includes('find') || normalized.includes('get') || normalized.includes('photos') || normalized.includes('pictures')) {
-    return { ...emptySchema, intent: 'search_photos', person: extractPersonFromMessage(message) };
+    const person = extractPersonFromMessage(message);
+    const inferredEvent = extractEventFromMessage(message);
+    const event =
+      person && inferredEvent && person.trim().toLowerCase() === inferredEvent.trim().toLowerCase()
+        ? null
+        : inferredEvent;
+    return {
+      ...emptySchema,
+      intent: 'search_photos',
+      person,
+      event
+    };
   }
 
   return emptySchema;

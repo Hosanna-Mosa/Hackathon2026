@@ -62,6 +62,7 @@ const UploadCenter = () => {
   const resultsRef = useRef<HTMLDivElement>(null);
   const [confirmingPhotoId, setConfirmingPhotoId] = useState<string | null>(null);
   const [faceOrder, setFaceOrder] = useState<"left_to_right" | "right_to_left">("left_to_right");
+  const [uploadEvent, setUploadEvent] = useState("");
   const [manualModeByPhoto, setManualModeByPhoto] = useState<Record<string, boolean>>({});
   const [focusedFaceIdByPhoto, setFocusedFaceIdByPhoto] = useState<Record<string, string | null>>({});
   const [selectedCandidateByFace, setSelectedCandidateByFace] = useState<Record<string, string>>({});
@@ -142,6 +143,7 @@ const UploadCenter = () => {
     setCustomLabelByFace({});
 
     setUploadedPhotos([]);
+    const normalizedEvent = uploadEvent.trim();
 
     // We will add to scanning set as they arrive
     const totalFiles = selectedFiles.length;
@@ -161,7 +163,7 @@ const UploadCenter = () => {
         }, 500);
 
         try {
-          const data = await uploadPhotosApi([file], faceOrder);
+          const data = await uploadPhotosApi([file], faceOrder, normalizedEvent);
 
           if (data.photos && data.photos.length > 0) {
             // Trigger Scan Animation for new photos
@@ -380,6 +382,18 @@ const UploadCenter = () => {
               </select>
             </div>
 
+            <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <span>Event:</span>
+              <input
+                type="text"
+                value={uploadEvent}
+                onChange={(e) => setUploadEvent(e.target.value)}
+                placeholder="e.g. Family trip, Wedding, Function"
+                maxLength={120}
+                className="w-full max-w-sm rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground"
+              />
+            </div>
+
             {error && (
               <div className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -455,6 +469,11 @@ const UploadCenter = () => {
                       <p className="text-xs text-muted-foreground">
                         {photo.faces.length} detected face{photo.faces.length === 1 ? "" : "s"}
                       </p>
+                      {photo.event && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Event: <span className="font-medium text-foreground">{photo.event}</span>
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       {photo.faces.length > 0 && (
