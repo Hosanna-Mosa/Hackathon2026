@@ -4,6 +4,9 @@ import { Send, Sparkles, Bot, Mic, Square } from "lucide-react";
 import { chatWithAgentApi, sendChatPhotosEmailApi, getChatHistoryApi, type Photo } from "@/lib/api";
 import { resolvePhotoUrl } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/context/AuthContext";
 
 const suggestedQueries = [
@@ -101,6 +104,9 @@ const AIAssistant = () => {
   const [isSending, setIsSending] = useState(false);
 
   const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
+  const [isRecipientSelectionOpen, setIsRecipientSelectionOpen] = useState(false);
+  const [availableRecipients, setAvailableRecipients] = useState<{ name: string; email: string }[]>([]);
+  const [selectedRecipientEmails, setSelectedRecipientEmails] = useState<string[]>([]);
   const [pendingEmailRequest, setPendingEmailRequest] = useState<PendingEmailRequest | null>(null);
   const [emailInput, setEmailInput] = useState("");
   const [emailError, setEmailError] = useState("");
@@ -295,6 +301,17 @@ const AIAssistant = () => {
         setIsEmailDialogOpen(true);
       }
 
+      if (response.result.action === "select_recipient") {
+        setAvailableRecipients(response.result.data?.recipients || []);
+        setPendingEmailRequest({
+          personId: response.result.data?.personId,
+          person: response.result.data?.person,
+          photoCount: response.result.data?.photoCount,
+        });
+        setSelectedRecipientEmails([]);
+        setIsRecipientSelectionOpen(true);
+      }
+
       if (response.result.data?.navigate && response.result.data?.targetUrl) {
         setTimeout(() => {
           navigate(response.result.data?.targetUrl as string);
@@ -387,8 +404,99 @@ const AIAssistant = () => {
     }
   };
 
+  const onSubmitSelectedRecipients = async () => {
+    if (!pendingEmailRequest || selectedRecipientEmails.length === 0 || isSubmittingEmail) {
+      return;
+    }
+
+    try {
+      setIsSubmittingEmail(true);
+      const response = await sendChatPhotosEmailApi({
+        personId: pendingEmailRequest.personId,
+        person: pendingEmailRequest.person,
+        recipientEmails: selectedRecipientEmails,
+        count: pendingEmailRequest.photoCount,
+      });
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `assistant-email-${Date.now()}`,
+          role: "assistant",
+          text: response.result.message,
+          action: response.result.action,
+          photos: response.result.data?.photos || [],
+        },
+      ]);
+
+      setIsRecipientSelectionOpen(false);
+      setPendingEmailRequest(null);
+      setSelectedRecipientEmails([]);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : "Failed to send photos.");
+    } finally {
+      setIsSubmittingEmail(false);
+    }
+  };
+
   return (
     <div className="animate-fade-in flex h-[calc(100vh-7rem)] gap-6">
+      <Dialog open={isRecipientSelectionOpen} onOpenChange={setIsRecipientSelectionOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Select Recipients</DialogTitle>
+            <DialogDescription>
+              Select who should receive the photos of {pendingEmailRequest?.person}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <ScrollArea className="h-[200px] w-full rounded-md border p-4">
+              <div className="space-y-4">
+                {availableRecipients.map((recipient) => (
+                  <div key={recipient.email} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`chk-${recipient.email}`}
+                      checked={selectedRecipientEmails.includes(recipient.email)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedRecipientEmails((prev) => [...prev, recipient.email]);
+                        } else {
+                          setSelectedRecipientEmails((prev) => prev.filter((e) => e !== recipient.email));
+                        }
+                      }}
+                    />
+                    <Label
+                      htmlFor={`chk-${recipient.email}`}
+                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                    >
+                      {recipient.name} ({recipient.email})
+                    </Label>
+                  </div>
+                ))}
+                {availableRecipients.length === 0 && <p className="text-sm text-muted-foreground">No contacts found.</p>}
+              </div>
+            </ScrollArea>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIsRecipientSelectionOpen(false)}
+              className="rounded-md border border-border px-3 py-2 text-sm"
+              disabled={isSubmittingEmail}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void onSubmitSelectedRecipients()}
+              className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50"
+              disabled={isSubmittingEmail || selectedRecipientEmails.length === 0}
+            >
+              {isSubmittingEmail ? "Sending..." : "Send Photos"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={isEmailDialogOpen}
         onOpenChange={(open) => {
