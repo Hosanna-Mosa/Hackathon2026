@@ -7,6 +7,7 @@ import AppLayout from "./components/layout/AppLayout";
 import RequireAuth from "./components/auth/RequireAuth";
 import Dashboard from "./pages/Dashboard";
 import Gallery from "./pages/Gallery";
+import PrivateGallery from "./pages/PrivateGallery";
 import People from "./pages/People";
 import UploadCenter from "./pages/UploadCenter";
 import Deliveries from "./pages/Deliveries";
@@ -28,6 +29,7 @@ const App = () => (
             <Route element={<AppLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/gallery" element={<Gallery />} />
+              <Route path="/private-gallery" element={<PrivateGallery />} />
               <Route path="/people" element={<People />} />
               <Route path="/upload" element={<UploadCenter />} />
               <Route path="/deliveries" element={<Deliveries />} />
