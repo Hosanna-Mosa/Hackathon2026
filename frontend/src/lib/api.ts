@@ -410,6 +410,7 @@ export const chatWithAgentApi = async (message: string) => {
         photoCount?: number;
         requiresEmail?: boolean;
         recipientEmail?: string;
+        recipients?: { name: string; email: string }[];
       };
     };
   }>("/api/chat", {
@@ -434,7 +435,8 @@ export const sendChatPhotosEmailApi = async (payload: {
   personId?: string;
   person?: string;
   recipientName?: string;
-  recipientEmail: string;
+  recipientEmail?: string;
+  recipientEmails?: string[];
   count?: number;
 }) => {
   return apiFetch<{

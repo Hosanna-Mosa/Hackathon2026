@@ -193,10 +193,41 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
     };
   }
 
+  // NEW: Check if we need to ask for a recipient (if none specified and we're not explicitly defaulting)
+  if (!recipientName && !recipientEmail) {
+    const contacts = await Person.find({
+      ownerId: userId,
+      email: { $ne: '', $exists: true }
+    }).select('name email').lean();
+
+    if (contacts.length > 0) {
+      return {
+        action: 'select_recipient',
+        message: `Who should I send the ${photos.length} photos of ${personDoc.name} to?`,
+        data: {
+          personId: String(personDoc._id),
+          person: personDoc.name,
+          photoCount: photos.length,
+          recipients: contacts.map(c => ({ name: c.name, email: c.email })),
+          photos
+        }
+      };
+    }
+  }
+
   // 3. Determine Recipient Email
   let targetEmail = normalizeEmail(recipientEmail);
   let targetName = recipientName || personDoc.name;
   let targetPersonId = null; // ID of the person whose email we are using (if resolved from DB)
+
+  // Try to resolve target name/id if email is provided but name is not
+  if (targetEmail && !recipientName) {
+    const byEmail = await Person.findOne({ ownerId: userId, email: targetEmail });
+    if (byEmail) {
+      targetName = byEmail.name;
+      targetPersonId = String(byEmail._id);
+    }
+  }
 
   if (recipientName) {
     const recipientDoc = await resolvePerson({ userId, personInput: recipientName });
@@ -209,22 +240,15 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
     } else {
       targetName = recipientName;
     }
-  } else {
+  } else if (!targetPersonId && !targetEmail) {
+    // Default to subject if no recipient specified AND no email provided
     targetName = personDoc.name;
     targetPersonId = String(personDoc._id);
-    if (!targetEmail) {
-      targetEmail = normalizeEmail(personDoc.email);
-    }
+    targetEmail = normalizeEmail(personDoc.email);
   }
 
   // 4. Validate Email or Request It
   if (!targetEmail || !EMAIL_REGEX.test(targetEmail)) {
-    // If we resolved a person (targetPersonId) but they have no email, we ask for it and update them later.
-    // If we have a raw name (targetName) but no person doc, we ask for it.
-
-    // We pass back recipientName so frontend can say "Enter email for Chinnu"
-    // We pass back personId/person (Subject) so we know whose photos to send.
-
     return {
       action: 'request_person_email',
       message: `I don't have an email for ${targetName}. Please enter it so I can send the photos.`,
@@ -240,16 +264,13 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
 
   // 5. If we found a Person Doc for the recipient (and they had an email, OR we were passed an email and matched it),
   // AND the email we are using differs from stored, we update.
-  // BUT logic is tricky with separate recipient.
-  // If we resolved a recipientDoc separate from subject:
   if (recipientName && targetPersonId) {
-    // We found a doc for recipient. Update their email if needed.
     const recipientDoc = await Person.findOne({ _id: targetPersonId, ownerId: userId });
     if (recipientDoc && normalizeEmail(recipientDoc.email) !== targetEmail) {
       recipientDoc.email = targetEmail;
       await recipientDoc.save();
     }
-  } else if (!recipientName && targetPersonId) {
+  } else if (!recipientName && targetPersonId && targetPersonId === String(personDoc._id)) {
     // We are sending to subject.
     if (normalizeEmail(personDoc.email) !== targetEmail) {
       personDoc.email = targetEmail;
@@ -607,7 +628,8 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
 
     const personId = String(req.body?.personId || '').trim();
     const person = String(req.body?.person || '').trim();
-    const recipientName = String(req.body?.recipientName || '').trim(); // New field
+    const recipientName = String(req.body?.recipientName || '').trim(); 
+    const recipientEmails = req.body?.recipientEmails; 
     const recipientEmail = normalizeEmail(req.body?.recipientEmail);
     const count = req.body?.count;
 
@@ -615,6 +637,59 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: 'personId or person is required.'
+      });
+    }
+
+    if (Array.isArray(recipientEmails) && recipientEmails.length > 0) {
+      const results = [];
+      const failures = [];
+      
+      for (const email of recipientEmails) {
+        if (!email || !EMAIL_REGEX.test(email)) continue;
+        
+        try {
+          const result = await sendPersonPhotosByEmail({
+            userId,
+            personInput: person,
+            personId,
+            recipientName, 
+            recipientEmail: email,
+            count,
+            senderName: req.user?.name,
+            senderEmail: req.user?.email
+          });
+          
+          if (result.action === 'send_photos' && !result.message.includes('couldn\'t send')) {
+            results.push(email);
+          } else {
+            failures.push(email);
+          }
+        } catch (e) {
+          failures.push(email);
+        }
+      }
+      
+      let message = '';
+      if (results.length > 0) {
+        message = `Successfully sent photos to ${results.length} recipient${results.length !== 1 ? 's' : ''}.`;
+      }
+      if (failures.length > 0) {
+        message += ` Failed to send to ${failures.length}.`;
+      }
+      if (results.length === 0 && failures.length > 0) {
+         message = `Failed to send emails to selected recipients.`;
+      }
+
+      return res.status(200).json({
+        success: true,
+        result: {
+          action: 'send_photos',
+          message,
+          data: {
+             sentTo: results,
+             failed: failures
+          }
+        }
       });
     }
 
