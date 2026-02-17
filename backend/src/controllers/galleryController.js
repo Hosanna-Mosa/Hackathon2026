@@ -54,8 +54,12 @@ const getPhotos = async (req, res, next) => {
       });
     }
 
-    const { person, dateFrom, dateTo } = req.query;
+    const { person, dateFrom, dateTo, event } = req.query;
     const dateFilter = buildDateFilter(dateFrom, dateTo);
+    const eventValue = String(event || '').trim();
+    const eventFilter = eventValue
+      ? { event: { $regex: escapeRegex(eventValue), $options: 'i' } }
+      : null;
 
     if (person) {
       const safePerson = escapeRegex(String(person).trim());
@@ -80,6 +84,9 @@ const getPhotos = async (req, res, next) => {
       if (dateFilter?.createdAt) {
         photoQuery.createdAt = dateFilter.createdAt;
       }
+      if (eventFilter?.event) {
+        photoQuery.event = eventFilter.event;
+      }
 
       const photos = await Photo.find(photoQuery).sort({ createdAt: -1 });
 
@@ -91,7 +98,8 @@ const getPhotos = async (req, res, next) => {
 
     const query = {
       ownerId: userId,
-      ...(dateFilter || {})
+      ...(dateFilter || {}),
+      ...(eventFilter || {})
     };
     const photos = await Photo.find(query).sort({ createdAt: -1 });
 
