@@ -164,7 +164,8 @@ const fetchPhotosForPerson = async ({ userId, personId, count }) => {
     .lean();
 };
 
-const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipientEmail, count, senderName, senderEmail }) => {
+const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipientName, recipientEmail, count, senderName, senderEmail }) => {
+  // 1. Resolve Subject (Photos of whom?)
   const personDoc = await resolvePerson({ userId, personInput, personId });
   if (!personDoc) {
     return {
@@ -174,6 +175,7 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
     };
   }
 
+  // 2. Fetch photos
   const photos = await fetchPhotosForPerson({
     userId,
     personId: personDoc._id,
@@ -191,48 +193,80 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
     };
   }
 
-  const providedEmail = normalizeEmail(recipientEmail);
-  if (providedEmail && !EMAIL_REGEX.test(providedEmail)) {
+  // 3. Determine Recipient Email
+  let targetEmail = normalizeEmail(recipientEmail);
+  let targetName = recipientName || personDoc.name;
+  let targetPersonId = null; // ID of the person whose email we are using (if resolved from DB)
+
+  if (recipientName) {
+    const recipientDoc = await resolvePerson({ userId, personInput: recipientName });
+    if (recipientDoc) {
+      targetName = recipientDoc.name;
+      targetPersonId = String(recipientDoc._id);
+      if (!targetEmail) {
+        targetEmail = normalizeEmail(recipientDoc.email);
+      }
+    } else {
+      targetName = recipientName;
+    }
+  } else {
+    targetName = personDoc.name;
+    targetPersonId = String(personDoc._id);
+    if (!targetEmail) {
+      targetEmail = normalizeEmail(personDoc.email);
+    }
+  }
+
+  // 4. Validate Email or Request It
+  if (!targetEmail || !EMAIL_REGEX.test(targetEmail)) {
+    // If we resolved a person (targetPersonId) but they have no email, we ask for it and update them later.
+    // If we have a raw name (targetName) but no person doc, we ask for it.
+
+    // We pass back recipientName so frontend can say "Enter email for Chinnu"
+    // We pass back personId/person (Subject) so we know whose photos to send.
+
     return {
       action: 'request_person_email',
-      message: 'Please provide a valid email address.',
+      message: `I don't have an email for ${targetName}. Please enter it so I can send the photos.`,
       data: {
-        personId: String(personDoc._id),
-        person: personDoc.name,
+        personId: String(personDoc._id), // Subject ID
+        person: personDoc.name,          // Subject Name
+        recipientName: targetName,       // Target Name (for UI Prompt)
         photoCount: photos.length,
         requiresEmail: true
       }
     };
   }
 
-  const targetEmail = providedEmail || normalizeEmail(personDoc.email);
-  if (!targetEmail) {
-    return {
-      action: 'request_person_email',
-      message: `I don't have an email for ${personDoc.name}. Please enter it so I can send the photos.`,
-      data: {
-        personId: String(personDoc._id),
-        person: personDoc.name,
-        photoCount: photos.length,
-        requiresEmail: true
-      }
-    };
+  // 5. If we found a Person Doc for the recipient (and they had an email, OR we were passed an email and matched it),
+  // AND the email we are using differs from stored, we update.
+  // BUT logic is tricky with separate recipient.
+  // If we resolved a recipientDoc separate from subject:
+  if (recipientName && targetPersonId) {
+    // We found a doc for recipient. Update their email if needed.
+    const recipientDoc = await Person.findOne({ _id: targetPersonId, ownerId: userId });
+    if (recipientDoc && normalizeEmail(recipientDoc.email) !== targetEmail) {
+      recipientDoc.email = targetEmail;
+      await recipientDoc.save();
+    }
+  } else if (!recipientName && targetPersonId) {
+    // We are sending to subject.
+    if (normalizeEmail(personDoc.email) !== targetEmail) {
+      personDoc.email = targetEmail;
+      await personDoc.save();
+    }
   }
 
-  if (targetEmail !== normalizeEmail(personDoc.email)) {
-    personDoc.email = targetEmail;
-    await personDoc.save();
-  }
-
+  // 6. Send Email
   const photoLinks = photos.map((photo) => String(photo.imageUrl || '').trim()).filter(Boolean);
   const safeSenderName = normalizeName(senderName) || 'Drishyamitra user';
   const safeSenderEmail = normalizeEmail(senderEmail);
-  const emailMessage = `Hi ${personDoc.name}, sharing ${photoLinks.length} photo${photoLinks.length === 1 ? '' : 's'} from ${safeSenderName}.`;
-  const emailSubject = `Photos shared for ${personDoc.name}`;
+  const emailMessage = `Hi ${targetName}, sharing ${photoLinks.length} photo${photoLinks.length === 1 ? '' : 's'} of ${personDoc.name} from ${safeSenderName}.`;
+  const emailSubject = `Photos of ${personDoc.name}`;
 
   const delivery = await Delivery.create({
     ownerId: userId,
-    person: personDoc.name,
+    person: targetName, // The recipient name
     type: 'email',
     recipientEmail: targetEmail,
     subject: emailSubject,
@@ -244,14 +278,14 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
 
   await linkEntitiesToUser({
     userId,
-    personIds: [String(personDoc._id)],
+    personIds: [String(personDoc._id)], // Link to Subject
     deliveryIds: [String(delivery._id)]
   });
 
   try {
     const providerResult = await sendDeliveryEmail({
       to: targetEmail,
-      person: personDoc.name,
+      person: targetName,
       subject: emailSubject,
       message: emailMessage,
       photoLinks,
@@ -266,7 +300,7 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
 
     return {
       action: 'send_photos',
-      message: `Sent ${photoLinks.length} photos of ${personDoc.name} to ${targetEmail}.`,
+      message: `Sent ${photoLinks.length} photos of ${personDoc.name} to ${targetEmail} (${targetName}).`,
       data: {
         delivery,
         photos,
@@ -282,7 +316,7 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
 
     return {
       action: 'send_photos',
-      message: `I found the photos but couldn't send the email: ${delivery.errorMessage}`,
+      message: `I found the photos but couldn't send the email to ${targetName}: ${delivery.errorMessage}`,
       data: {
         delivery,
         photos,
@@ -294,7 +328,7 @@ const sendPersonPhotosByEmail = async ({ userId, personInput, personId, recipien
   }
 };
 
-const handleDeliveryIntent = async ({ userId, person, platform, count, messageText, senderName, senderEmail }) => {
+const handleDeliveryIntent = async ({ userId, person, recipient, platform, count, messageText, senderName, senderEmail }) => {
   const resolvedPlatform = normalizePlatform(platform, messageText);
   const resolvedPerson = String(person || '').trim() || extractPersonFromMessage(messageText || '');
 
@@ -309,16 +343,17 @@ const handleDeliveryIntent = async ({ userId, person, platform, count, messageTe
     return sendPersonPhotosByEmail({
       userId,
       personInput: resolvedPerson,
+      recipientName: recipient, // Pass the recipient name if determined
       count,
       senderName,
       senderEmail
     });
   }
 
-  const recipient = resolvedPerson || 'requested contact';
+  const deliveryPerson = recipient || resolvedPerson || 'requested contact';
   const delivery = await Delivery.create({
     ownerId: userId,
-    person: recipient,
+    person: deliveryPerson,
     type: 'whatsapp',
     status: 'sent',
     timestamp: new Date()
@@ -331,7 +366,7 @@ const handleDeliveryIntent = async ({ userId, person, platform, count, messageTe
 
   return {
     action: 'send_photos',
-    message: `Delivery logged for ${recipient} via whatsapp.`,
+    message: `Delivery logged for ${deliveryPerson} via whatsapp.`,
     data: { delivery }
   };
 };
@@ -377,7 +412,7 @@ const chatWithAgent = async (req, res, next) => {
       });
     }
 
-    const { intent, person, event, location, date_range, count, platform } = decision;
+    const { intent, person, recipient, event, location, date_range, count, platform } = decision;
 
     let result = {
       action: intent,
@@ -442,9 +477,38 @@ const chatWithAgent = async (req, res, next) => {
         break;
 
       case 'send_photos':
-        const sendResult = await photoService.sendPhotos({ person, platform, count, ownerId: userId });
-        result.message = sendResult.message;
-        result.data = sendResult.data || {};
+        // 1. Context Resolution: If person is missing, look at recent history
+        if (!person) {
+          try {
+            const lastPersonHistory = await ChatHistory.findOne({
+              ownerId: userId,
+              'agentDecision.person': { $ne: null }
+            }).sort({ createdAt: -1 });
+
+            if (lastPersonHistory?.agentDecision?.person) {
+              decision.person = lastPersonHistory.agentDecision.person;
+              // console.log('Context inferred person:', decision.person);
+            }
+          } catch (ctxError) {
+            console.error('Context inference failed:', ctxError);
+          }
+        }
+
+        // 2. Use handleDeliveryIntent which supports email verification and prompts
+        const deliveryResult = await handleDeliveryIntent({
+          userId,
+          person: decision.person,
+          recipient: decision.recipient, // Pass extracted recipient
+          platform: platform || 'email', // Default to email if not specified but intent is send
+          count,
+          messageText: userPrompt,
+          senderName: req.user?.name,
+          senderEmail: req.user?.email
+        });
+
+        result.action = deliveryResult.action;
+        result.message = deliveryResult.message;
+        result.data = deliveryResult.data || {};
         break;
 
       case 'get_most_photos':
@@ -543,6 +607,7 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
 
     const personId = String(req.body?.personId || '').trim();
     const person = String(req.body?.person || '').trim();
+    const recipientName = String(req.body?.recipientName || '').trim(); // New field
     const recipientEmail = normalizeEmail(req.body?.recipientEmail);
     const count = req.body?.count;
 
@@ -557,6 +622,7 @@ const sendPhotosEmailFromDialog = async (req, res, next) => {
       userId,
       personInput: person,
       personId,
+      recipientName, // Pass generic recipient name
       recipientEmail,
       count,
       senderName: req.user?.name,

@@ -417,6 +417,7 @@ export const getChatHistoryApi = async (limit = 50) => {
 export const sendChatPhotosEmailApi = async (payload: {
   personId?: string;
   person?: string;
+  recipientName?: string;
   recipientEmail: string;
   count?: number;
 }) => {

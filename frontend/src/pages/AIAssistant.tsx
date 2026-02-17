@@ -34,6 +34,7 @@ type ChatMessage = {
 type PendingEmailRequest = {
   personId?: string;
   person?: string;
+  recipientName?: string;
   photoCount?: number;
 };
 
@@ -286,6 +287,7 @@ const AIAssistant = () => {
         setPendingEmailRequest({
           personId: response.result.data?.personId,
           person: response.result.data?.person,
+          recipientName: response.result.data?.recipientName,
           photoCount: response.result.data?.photoCount,
         });
         setEmailInput("");
@@ -359,6 +361,7 @@ const AIAssistant = () => {
       const response = await sendChatPhotosEmailApi({
         personId: pendingEmailRequest.personId,
         person: pendingEmailRequest.person,
+        recipientName: pendingEmailRequest.recipientName,
         recipientEmail: email,
         count: pendingEmailRequest.photoCount,
       });
@@ -401,7 +404,7 @@ const AIAssistant = () => {
           <DialogHeader>
             <DialogTitle>Add Email To Continue</DialogTitle>
             <DialogDescription>
-              Enter an email for {pendingEmailRequest?.person || "this person"} to save it and send the photos now.
+              Enter an email for {pendingEmailRequest?.recipientName || pendingEmailRequest?.person || "this person"} to save it and send the photos now.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
