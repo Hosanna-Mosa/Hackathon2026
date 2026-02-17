@@ -79,7 +79,8 @@ const getGroqAgentDecision = async (message) => {
   OUTPUT SCHEMA (Strict JSON):
   {
     "intent": "search_photos" | "count_photos" | "send_photos" | "get_most_photos" | "get_least_photos" | "get_latest_uploads" | "unknown",
-    "person": string | null,    // e.g., "John", "Mom", "Dad"
+    "person": string | null,    // e.g., "John", "Mom", "Dad" (The subject of the photos)
+    "recipient": string | null, // e.g., "Dad", "Chinnu" (The person receiving the photos, if specified)
     "event": string | null,     // e.g., "birthday", "wedding"
     "location": string | null,  // e.g., "Paris", "beach", "home"
     "date_range": string | null,// e.g., "last year", "2024", "yesterday", "last week"
@@ -97,19 +98,19 @@ const getGroqAgentDecision = async (message) => {
 
   EXAMPLES:
   1. "Show birthday photos of John from last year"
-     -> {"intent": "search_photos", "person": "John", "event": "birthday", "date_range": "last year", "location": null, "count": null, "platform": null}
+     -> {"intent": "search_photos", "person": "John", "recipient": null, "event": "birthday", "date_range": "last year", "location": null, "count": null, "platform": null}
   
   2. "Send latest 5 photos of Mom on WhatsApp"
-     -> {"intent": "send_photos", "person": "Mom", "count": 5, "platform": "WhatsApp", "event": null, "location": null, "date_range": "latest"}
+     -> {"intent": "send_photos", "person": "Mom", "recipient": null, "count": 5, "platform": "WhatsApp", "event": null, "location": null, "date_range": "latest"}
 
   3. "How many photos of Babai do I have?"
-     -> {"intent": "count_photos", "person": "Babai", "event": null, "location": null, "date_range": null, "count": null, "platform": null}
+     -> {"intent": "count_photos", "person": "Babai", "recipient": null, "event": null, "location": null, "date_range": null, "count": null, "platform": null}
 
-  4. "Show beach pictures from 2024"
-     -> {"intent": "search_photos", "location": "beach", "date_range": "2024", "person": null, "event": null, "count": null, "platform": null}
+  4. "Send Dhanush photos to Chinnu mail"
+     -> {"intent": "send_photos", "person": "Dhanush", "recipient": "Chinnu", "event": null, "location": null, "date_range": null, "count": null, "platform": "email"}
 
   5. "Find happy family moments"
-     -> {"intent": "search_photos", "event": "happy family moments", "person": null, "location": null, "date_range": null, "count": null, "platform": null} 
+     -> {"intent": "search_photos", "event": "happy family moments", "person": null, "recipient": null, "location": null, "date_range": null, "count": null, "platform": null} 
 
   Return ONLY valid JSON. No markdown.`;
 
